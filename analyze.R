@@ -32,16 +32,11 @@ library(lmerTest)
 library(emmeans)
 library(tidyverse)
 
-source("Z:/Public/Jonas/004_ESWW007/RScripts/utils.R")
+source("C:/Users/anjonas/RProjects/lesionProc/utils.R")
 
 # ============================================================================== -
 # 0) Prepare ----
 # ============================================================================== -
-
-# # paths
-# data_path <- "Z:/Public/Jonas/011_STB_leaf_tracking/output/datasets_test/"
-# figure_path <- "Z:/Public/Jonas/011_STB_leaf_tracking/Figures/2/"
-# meta_path <- "Z:/Public/Jonas/011_STB_leaf_tracking/output/ts2/"
 
 # paths
 in_path <- "Z:/Public/Jonas/011_STB_leaf_tracking/output/"
@@ -49,11 +44,12 @@ data_path <- "Z:/Public/Jonas/011_STB_leaf_tracking/data/"
 figure_path <- "Z:/Public/Jonas/011_STB_leaf_tracking/Figures/4/"
 
 # base plot
-col = pal_jco()(10)[c(1, 8, 9)]
+colors = c("#E1BE6A", "#40B0A6")
+
 base_plot_batches <- ggplot() +
-  scale_color_manual(values =  col, 
-                     breaks = c("1", "2", "3"),
-                     labels = c("Batch1", "Batch2", "Batch3")) +
+  scale_color_manual(values =  colors, 
+                     breaks = c("1", "2"),
+                     labels = c("Batch1", "Batch2")) +
   xlab("Time of measurement") +
   guides(colour = guide_legend(override.aes = list(alpha = 1))) +
   theme(panel.background = element_blank(),
@@ -63,6 +59,11 @@ base_plot_batches <- ggplot() +
         axis.line = element_line(),
         legend.title = element_blank(),
         legend.position.inside = c(0.8, 0.1))
+
+exp_labels <- c(
+  "ESWW007" = "2023",
+  "ESWW009" = "2024"
+)
 
 # ============================================================================== -
 # 1) Get data ----
@@ -240,13 +241,13 @@ saveRDS(df, paste0(data_path, "subset_step0.rds"))
 
 df <- readRDS(paste0(data_path, "subset_step0.rds"))
 
-# Time vs. GDD
+# Chronological time vs. Thermal time
 p <- base_plot_batches + 
   geom_point(data = df, aes(x = lesion_age, y = lesion_age_gdd, color = as.factor(batch)), alpha = 0.3) +
-  ylab("Lesion age (effective)") +
+  ylab("Lesion age (thermal time)") +
   scale_x_continuous(name = "Lesion age (hours)") +
-  facet_wrap(~exp_UID)
-png(paste0(figure_path, "thermal_chronological_age.png"), width = 7, height = 4, units = 'in', res = 400)
+  facet_wrap(~exp_UID, labeller = labeller(exp_UID = exp_labels))
+png(paste0(figure_path, "thermal_chronological_age.png"), width = 8, height = 3.5, units = 'in', res = 400)
 plot(p)
 dev.off()
 
@@ -363,58 +364,6 @@ sub <- subset %>%
   dplyr::select(-lag_analyzable_perimeter) %>%  # to avoid conflicts further down
   filter(!is.na(area))
 
-# lesion area vs measurement time point
-p <- list()
-for (exp in unique(sub$exp_UID)){
-  plotdat <- sub[!is.na(sub$area),]
-  plotdat <- plotdat[plotdat$exp_UID == exp,]
-  p[[exp]] <- base_plot_batches +
-    geom_line(data = plotdat, 
-              aes(x = timestamp, y = area, color = as.factor(batch), 
-                  group=interaction(plot_UID, leaf_nr, lesion_nr)),
-              alpha = 0.25, linewidth = 0.33) +
-    geom_point(data = plotdat[!is.na(plotdat$area),], 
-               aes(x = timestamp, y = area, color = as.factor(batch), 
-                   group=interaction(plot_UID, leaf_nr, lesion_nr)),  alpha = 0.25) +
-    scale_y_continuous(limits = c(0, 150),
-                       name = bquote("Lesion area (mm" ^2~")")) +
-    facet_grid(exp_UID ~ genotype_name) +
-    theme(axis.text.x=element_text(angle = 45, vjust = 1, hjust=1))
-  }
-p <- do.call(grid.arrange, c(p, ncol = 1))
-
-png(paste0(figure_path, "01_lesion_development_timestamp.png"), width = 15, height = 6, units = 'in', res = 400)
-plot(p)
-dev.off()
-
-# lesion area vs lesion age (GDD)
-p <- list()
-for (exp in unique(subset$exp_UID)){
-  plotdat <- subset[!is.na(subset$area),]
-  plotdat <- plotdat[plotdat$exp_UID == exp,]
-  n_obs_exp <- n_obs[n_obs$exp_UID == exp,] 
-  p[[exp]] <- base_plot_batches +
-    geom_line(data = plotdat, 
-              aes(x = lesion_age_gdd, y = area, color = as.factor(batch), 
-                  group=interaction(plot_UID, leaf_nr, lesion_nr)),
-              alpha = 0.15, linewidth = 0.33) +
-    geom_point(data = plotdat[!is.na(plotdat$area),], 
-               aes(x = lesion_age_gdd, y = area, color = as.factor(batch), 
-                   group=interaction(plot_UID, leaf_nr, lesion_nr)),  alpha = 0.15) +
-    scale_y_continuous(limits = c(0, 100), 
-                       name = bquote("Lesion area (mm" ^2~")")) +
-    scale_x_continuous(name = "Lesion age (effective)") +
-    facet_grid(exp_UID ~ genotype_name) +
-    geom_text(data = n_obs_exp, aes(x = 0, y = Inf, label = paste0("leaves: ", n_leaf, "\nlesions: ", n_lesion, "\nintervals: ", n_interval)),
-              hjust = 0, vjust = 1.1, inherit.aes = FALSE, size = 2.1, color = "darkblue") +
-    theme(axis.text.x=element_text(angle = 0, vjust = 1, hjust=1))
-}
-p <- do.call(grid.arrange, c(p, ncol = 1))
-
-png(paste0(figure_path, "02_lesion_development_abs_genotypes_gdd.png"), width = 15, height = 5.5, units = 'in', res = 600)
-plot(p)
-dev.off()
-
 saveRDS(sub, paste0(data_path, "subset_step_0_filtered.rds"))
 
 # ============================================================================== -
@@ -437,8 +386,8 @@ saveRDS(s, paste0(data_path, "subset_step_0_filtered_withlags.rds"))
 # ============================================================================== -
 
 # get normalized growth
-s <- readRDS(paste0(data_path, "subset_step_0_filtered_withlags.rds"))
-s <- s %>% 
+data <- readRDS(paste0(data_path, "subset_step_0_filtered_withlags.rds"))
+data <- data %>% 
   # remove intervals without lag timepoint
   dplyr::filter(!is.na(lag_timestamp)) %>% 
   # remove short intervals
@@ -455,7 +404,7 @@ s <- s %>%
 
 
 # plot cumulative distribution of percentiles for UN-filtered data
-x_sorted <- sort(s$diff_area_norm_chr)
+x_sorted <- sort(data$diff_area_norm_chr)
 percentiles <- ecdf(x_sorted)(x_sorted) * 100
 df <- data.frame(value = x_sorted, percentile = percentiles)
 A <- ggplot(df, aes(x = value, y = percentile)) +
@@ -464,7 +413,7 @@ A <- ggplot(df, aes(x = value, y = percentile)) +
   ggtitle("A")
 
 # get quantiles for each growth measure
-quants <- s %>% 
+quants <- data %>% 
   pivot_longer(cols = diff_area_norm_chr:diff_area_pp_xy_norm_gdd) %>% 
   group_by(name) %>% 
   summarise(
@@ -477,60 +426,116 @@ for(colname in quants$name) {
   print(colname)
   lower_limit <- quants[quants$name == colname, ]$x_min
   upper_limit <- quants[quants$name == colname, ]$x_max
-  s <- s[s[[colname]] >= lower_limit & s[[colname]] <= upper_limit, ]
+  data <- data[data[[colname]] >= lower_limit & data[[colname]] <= upper_limit, ]
 }
 
 # get mean environmental variables for intervals
-s <- s %>% 
+data <- data %>% 
   mutate(mean_interval_temp = purrr::map_dbl(covar_course, ~mean(.$temp, na.rm = T)),
          mean_interval_rh = purrr::map_dbl(covar_course, ~mean(.$rh, na.rm = T)),
          cv_interval_temp = purrr::map_dbl(covar_course, ~sd(.$temp, na.rm = TRUE) / mean(.$temp, na.rm = TRUE)),
          cv_interval_rh = purrr::map_dbl(covar_course, ~sd(.$rh, na.rm = TRUE) / mean(.$rh, na.rm = TRUE)))
 
 # statistics on intervals
-interval_stats <- s %>% ungroup() %>% 
+interval_stats <- data %>% ungroup() %>% 
   dplyr::summarise(mean_int = mean(diff_time, na.rm = T),
                    sd_int = sd(diff_time, na.rm = T), 
                    min_int = min(diff_time, na.rm = T),
                    max_int = max(diff_time, na.rm = T))
 
 # a problem with one lesion (ESWW0020_9_9); remove
-s <- s %>% dplyr::filter(lesion_UID != "ESWW0070020_9_9")
+data <- data %>% dplyr::filter(lesion_UID != "ESWW0070020_9_9")
 
-saveRDS(s, paste0(data_path, "subset_step2.rds"))
+saveRDS(data, paste0(data_path, "subset_step2.rds"))
 # data ready for feature selection
 
 # data set size
-s <- s %>% extract_covars_from_nested("design", "genotype_name")
-n_lesions <- s %>% group_by(lesion_UID) %>% nest()
+data <- readRDS( paste0(data_path, "subset_step2.rds"))
+data <- data %>% extract_covars_from_nested("design", "genotype_name")
+n_lesions <- data %>% group_by(lesion_UID) %>% nest()
 n_intervals_lesion <- n_lesions %>% ungroup() %>% 
   mutate(n_obs = purrr::map_dbl(data, nrow)) %>% 
   dplyr::summarise(mean_n_obs = mean(n_obs),
                    min_n_obs = min(n_obs),
                    max_n_obs = max(n_obs))
-n_leaves <- s %>% group_by(leaf_UID) %>% nest()
-n_leafs_geno <- s %>% 
+n_leaves <- data %>% group_by(leaf_UID) %>% nest()
+n_leafs_geno <- data %>% 
   group_by(exp_UID, genotype_name, leaf_UID) %>% nest() %>% 
   group_by(exp_UID, genotype_name) %>% nest() %>% 
   mutate(n_leaf = purrr::map_dbl(data, nrow)) %>% select(-data)
-n_lesions_geno <- s  %>%
+n_lesions_geno <- data  %>%
   group_by(genotype_name, lesion_UID) %>% nest() %>% 
   group_by(genotype_name) %>% nest() %>% 
   mutate(n_lesion = purrr::map_dbl(data, nrow)) %>% select(-data)
-n_interval_geno <- s %>% group_by(genotype_name) %>% nest() %>% 
+n_interval_geno <- data %>% group_by(genotype_name) %>% nest() %>% 
   mutate(n_interval = purrr::map_dbl(data, nrow)) %>% select(-data)
 n_obs <- full_join(n_leafs_geno, n_lesions_geno) %>% 
   full_join(., n_interval_geno)
 
-# Time vs. GDD
+# lesion area vs measurement time point
+p <- list()
+for (exp in unique(data$exp_UID)){
+  plotdat <- data[!is.na(data$area),]
+  plotdat <- plotdat[plotdat$exp_UID == exp,]
+  n_obs_exp <- n_obs[n_obs$exp_UID == exp,] 
+  p[[exp]] <- base_plot_batches +
+    geom_line(data = plotdat, 
+              aes(x = timestamp, y = area, color = as.factor(batch), 
+                  group=interaction(plot_UID, leaf_nr, lesion_nr)),
+              alpha = 0.25, linewidth = 0.33) +
+    geom_point(data = plotdat[!is.na(plotdat$area),], 
+               aes(x = timestamp, y = area, color = as.factor(batch), 
+                   group=interaction(plot_UID, leaf_nr, lesion_nr)),  alpha = 0.25) +
+    scale_y_continuous(limits = c(0, 150),
+                       name = bquote("Lesion area (mm" ^2~")")) +
+    facet_grid(exp_UID ~ genotype_name,
+               labeller = labeller(exp_UID = exp_labels)) +
+    theme(axis.text.x=element_text(angle = 45, vjust = 1, hjust=1),
+          panel.background = element_rect(fill = "grey97"))
+}
+p <- do.call(grid.arrange, c(p, ncol = 1))
+png(paste0(figure_path, "01_lesion_development_timestamp.png"), width = 15, height = 6, units = 'in', res = 400)
+plot(p)
+dev.off()
+
+# lesion area vs lesion age (GDD)
+p <- list()
+for (exp in unique(data$exp_UID)){
+  plotdat <- data[!is.na(data$area),]
+  plotdat <- plotdat[plotdat$exp_UID == exp,]
+  n_obs_exp <- n_obs[n_obs$exp_UID == exp,] 
+  p[[exp]] <- base_plot_batches +
+    geom_line(data = plotdat, 
+              aes(x = lesion_age_gdd, y = area, color = as.factor(batch), 
+                  group=interaction(plot_UID, leaf_nr, lesion_nr)),
+              alpha = 0.15, linewidth = 0.33) +
+    geom_point(data = plotdat[!is.na(plotdat$area),], 
+               aes(x = lesion_age_gdd, y = area, color = as.factor(batch), 
+                   group=interaction(plot_UID, leaf_nr, lesion_nr)),  alpha = 0.15) +
+    scale_y_continuous(limits = c(0, 100), 
+                       name = bquote("Lesion area (mm" ^2~")")) +
+    scale_x_continuous(name = "Lesion age (effective)") +
+    facet_grid(exp_UID ~ genotype_name,
+               labeller = labeller(exp_UID = exp_labels)) +
+    geom_text(data = n_obs_exp, aes(x = 0, y = Inf, label = paste0("leaves: ", n_leaf, "\nlesions: ", n_lesion, "\nintervals: ", n_interval)),
+              hjust = 0, vjust = 1.1, inherit.aes = FALSE, size = 2.1, color = "black") +
+    theme(axis.text.x=element_text(angle = 0, vjust = 1, hjust=1),
+          panel.background = element_rect(fill = "grey97"))
+}
+p <- do.call(grid.arrange, c(p, ncol = 1))
+png(paste0(figure_path, "02_lesion_development_abs_genotypes_gdd.png"), width = 15, height = 5.5, units = 'in', res = 600)
+plot(p)
+dev.off()
+
+# Time vs. Thermal time
 p <- base_plot_batches + 
-  geom_point(data = s, aes(x = diff_time, y = diff_gdd, color = as.factor(batch)), alpha = 0.2) +
-  ylab("Measurement interval (effective)") +
+  geom_point(data = data, aes(x = diff_time, y = diff_gdd, color = as.factor(batch)), alpha = 0.2) +
+  ylab("Interval duration (thermal time)") +
   scale_x_continuous(
-    name = "Measurement interval (hours)"
+    name = "Interval duration (hours)"
   ) +
-  facet_wrap(~exp_UID)
-png(paste0(figure_path, "thermal_chronological_interval.png"), width = 7, height = 4, units = 'in', res = 400)
+  facet_wrap(~exp_UID, labeller = labeller(exp_UID = exp_labels))
+png(paste0(figure_path, "thermal_chronological_interval.png"), width = 8, height = 3.5, units = 'in', res = 400)
 plot(p)
 dev.off()
 
@@ -710,6 +715,7 @@ both <- both %>%
 qr_models <- both %>% nest() %>% 
   mutate(
     linear_q = purrr::map(data, ~ rq(mean_delta ~ area, data = .)),
+    linear_q_sqrt = purrr::map(data, ~ rq(mean_delta ~ area + sqrt(area), data = .)),
     loess_q = purrr::map(data, ~ lprq(x = .$area, 
                                       y = .$mean_delta, 
                                       h = (range(.$area)[2]-range(.$area)[1])/20,
@@ -721,6 +727,7 @@ qr_models <- both %>% nest() %>%
 qr_models2 <- qr_models %>% 
   mutate(
     predicted_qr = purrr::map2(linear_q, new_data, ~ predict(.x, newdata = .y)),
+    predicted_qr_sqrt = purrr::map2(linear_q_sqrt, new_data, ~ predict(.x, newdata = .y)),
     predicted_lpqr = purrr::map2(loess_q, new_data, ~ {
       fit_values <- .x$fv
       predict_values <- approx(.x$xx, fit_values, xout = .y$area)$y
@@ -729,14 +736,14 @@ qr_models2 <- qr_models %>%
   )
 
 qr_models3 <- qr_models2 %>% 
-  mutate(pseudo_r2 = purrr::map2(data, linear_q, ~ compute_pseudoR2(.x, response = "mean_delta", qr_model = .y)))
+  mutate(pseudo_r2 = purrr::map2(data, linear_q_sqrt, ~ compute_pseudoR2(.x, response = "mean_delta", qr_model = .y)))
 
 qr_models4 <- qr_models3 %>% 
   mutate(r2 = map_dbl(pseudo_r2, 1))
 
 predictions <- qr_models2 %>% 
-  dplyr::select(new_data, predicted_qr, predicted_lpqr) %>% 
-  unnest(cols = c(new_data, predicted_qr, predicted_lpqr))
+  dplyr::select(new_data, predicted_qr, predicted_qr_sqrt, predicted_lpqr) %>% 
+  unnest(cols = c(new_data, predicted_qr, predicted_qr_sqrt, predicted_lpqr))
 
 pB <- ggplot(both) +
   scale_y_continuous(
@@ -746,11 +753,9 @@ pB <- ggplot(both) +
   geom_point(aes(x = area, y=mean_delta), alpha = 0.1) +
   geom_line(data = predictions, aes(y = predicted_lpqr, x = area), color = "green", size = 1) +
   # QR linear
-  geom_line(data = predictions, aes(y = predicted_qr, x = area), size = 1, color = "yellow") +
+  geom_line(data = predictions, aes(y = predicted_qr_sqrt, x = area), size = 1, color = "yellow") +
   geom_text(data = qr_models4, aes(x = Inf, y = Inf, label = paste0("R²: ", round(r2, 2))),
             hjust = 1.35, vjust = 2, inherit.aes = FALSE) 
-  # + ggtitle("B")
-
 png(paste0(figure_path, "init_growth.png"), width = 3.5, height = 3.5, units = 'in', res = 400)
 plot(pB)
 dev.off()
@@ -958,7 +963,7 @@ plot(plot)
 dev.off()
 
 # ============================================================================== -
-# 10) Growth ~ Age ----
+# 11) Growth ~ Age ----
 # ============================================================================== -
 
 mdat <- readRDS(paste0(data_path, "subset_step2.rds"))
@@ -997,25 +1002,20 @@ rq_yy <- predict(rqmodel, newdata = new_preds)
 
 ## Fit models ================================================================== -
 
-x = "lesion_age_gdd"
-y = "diff_area_pp_y_norm_gdd"
-
-# fits <- mdat %>% nest() %>% 
+# fit and save models
+x = "lesion_age_gdd" # independent variable
+y = "diff_area_pp_y_norm_gdd"  # dependent variable
+# fits <- mdat %>% nest() %>%
 #   mutate(linear_q = purrr::map(.x = data, .f = linear_quantile, x=x, y=y),
-#          nls_q_exp = purrr::map(.x = data, .f = nls_quantile_exp, n_samples = 300, x=x, y=y)) %>%  
+#          nls_q_exp = purrr::map(.x = data, .f = nls_quantile_exp, n_samples = 300, x=x, y=y)) %>%
 #   tidyr::pivot_longer(cols = linear_q:nls_q_exp, names_to = "type", values_to = "fit")
 # saveRDS(fits, paste0(data_path, "model_fits.rds"))
 
+# re-load and evaluate models
 fits <- readRDS(paste0(data_path, "model_fits.rds"))
 
 # get pseudo-r2
-resid_fit <- residuals(fits$fit[[2]])
-rho_tau <- function(u, tau) {
-  u * (tau - (u < 0))
-}
-numerator <- sum(rho_tau(resid_fit, tau=.5))
-denominator <- sum(rho_tau(mdat[[y]] - median(mdat[[y]]), tau=.5))
-pseudo_R2 <- 1 - numerator / denominator
+pseudo_R2 <- compute_pseudoR2_nl(obj = fits$fit[[2]], response = y)
 
 pdat <- fits %>% 
   mutate(preds = purrr::map(fit, broom::augment, newdata = new_preds))
@@ -1028,9 +1028,9 @@ pd <- pdat %>%
 p1 <- ggplot() +
   geom_point(data = pd, aes(x = lesion_age_gdd, y = diff_area_pp_y_norm_gdd), alpha = 0.025) +
   # add loess fit
-  geom_line(aes(x = fit$xx, y = fit$fv), color = "green") +
+  geom_line(aes(x = fit$xx, y = fit$fv), color = "green", size = 1) +
   # add linear and non-linear fit
-  geom_line(data = preds, aes(x = lesion_age_gdd, y = .fitted), color = "yellow") +
+  geom_line(data = preds, aes(x = lesion_age_gdd, y = .fitted), color = "yellow", size = 1) +
   scale_y_continuous(
     name = bquote("Lesion growth (" ~ A[t[1]] - A[t[0]] ~ ")"),
   ) +
@@ -1046,6 +1046,238 @@ p1 <- ggplot() +
 png(paste0(figure_path, "05_fits_growth_age_all_density.png"), width = 3.5, height = 3.5, units = 'in', res = 400)
 plot(p1)
 dev.off()
+
+# ============================================================================== -
+# 12) Growth ~ Env ----
+# ============================================================================== -
+
+# get environmental data
+mdat <- readRDS(paste0(data_path, "subset_step2.rds")) %>% 
+  extract_covars_from_nested("design", "genotype_name") %>% 
+  mutate(batch_UID = paste(exp_UID, batch, sep = "_")) %>% 
+  dplyr::rename(diff = "diff_area_pp_y_norm_chr")
+pdat <- mdat %>% 
+  dplyr::select(plot_UID, leaf_nr, lesion_nr, 
+                diff, 
+                cv_interval_rh, 
+                mean_interval_rh,
+                cv_interval_temp, 
+                mean_interval_temp) %>% 
+  pivot_longer(cols = 5:8)
+
+# can fit loess only if sufficient data is available
+# must limit the range of the predictor variable slightly 
+# this is means ignoring few extremely large values perimeter values (keep 98%)
+loess_limits <- pdat %>% 
+  group_by(name) %>% 
+  summarise(
+    x_min = quantile(value, 0.01),
+    x_max = quantile(value, 0.99)
+  )
+pdat <- pdat %>% 
+  left_join(., loess_limits) %>% 
+  filter(value >= x_min & value <= x_max)
+
+# Fit a quantile regression model
+qr_models <- pdat %>% 
+  group_by(name) %>% nest() %>% ungroup() %>% 
+  mutate(linear_q = purrr::map(data, ~ rq(diff ~ value, data = .)), 
+         loess_q = purrr::map(data, ~ lprq(x = .$value, 
+                                           y = .$diff, 
+                                           h = (range(.$value)[2]-range(.$value)[1])/20, 
+                                           tau = .5)),
+         new_data = purrr::map(data, ~ data.frame(value = seq(min(.$value), max(.$value), length.out = 1000))))
+
+# Make predictions for both QR and LPQR models
+qr_models2 <- qr_models %>% 
+  mutate(
+    predicted_qr = purrr::map2(linear_q, new_data, ~ predict(.x, newdata = .y)),
+    predicted_lpqr = purrr::map2(loess_q, new_data, ~ {
+      fit_values <- .x$fv
+      predict_values <- approx(.x$xx, fit_values, xout = .y$value)$y
+      return(predict_values)
+    })
+  )
+
+qr_models3 <- qr_models2 %>% 
+  mutate(pseudo_r2 = purrr::map2(data, linear_q, ~ compute_pseudoR2(.x, response = "diff", qr_model = .y)))
+
+qr_models4 <- qr_models3 %>% 
+  mutate(r2 = map_dbl(pseudo_r2, 1))
+
+predictions <- qr_models2 %>% 
+  dplyr::select(name, new_data, predicted_qr, predicted_lpqr) %>% 
+  unnest(cols = c(new_data, predicted_qr, predicted_lpqr))
+
+# New facet label names for direction variable
+dir_labs <- c("CV Relative Humidity", "CV Temperature", "Mean Temperature", "Mean Relative Humidity")
+names(dir_labs) <- c("cv_interval_rh", "cv_interval_temp", "mean_interval_temp", "mean_interval_rh")
+
+p <- ggplot() +
+  geom_point(data = pdat, aes(x = value, y = diff), alpha = 0.02) +
+  # # qr loess
+  geom_line(data = predictions, aes(y = predicted_lpqr, x = value), color = "green", size = 1) +
+  # QR linear
+  geom_line(data = predictions, aes(y = predicted_qr, x = value), lty = 2, color = "yellow", size = 1) +
+  geom_abline(intercept = 0, slope = 0, lty = 2) +
+  scale_y_continuous(
+    name = bquote("Lesion growth (" ~ A[t[1]] - A[t[0]] ~ ")")) +
+  scale_x_continuous(name = "Environmental covariate value") +
+  facet_wrap(~name,
+             labeller = labeller(name = dir_labs),
+             scales = "free_x") +
+  geom_text(data = qr_models4, aes(x = Inf, y = Inf, label = paste0("R²: ", round(r2, 2))),
+            hjust = 1.5, vjust = 2, inherit.aes = FALSE) +
+  theme(panel.background = element_rect(fill = "#E5E5E5"),
+        panel.spacing = unit(1.5, "lines")) 
+
+png(paste0(figure_path, "covars_regr_univariate.png"), width = 7, height = 6, units = 'in', res = 400)
+plot(p)
+dev.off()
+
+# ============================================================================== -
+# 13) Growth ~ Pycnidiation ----
+# ============================================================================== -
+
+pd <- readRDS(paste0(data_path, "subset_step2.rds")) %>% 
+  extract_covars_from_nested("design", "genotype_name") %>% 
+  mutate(batch_UID = paste(exp_UID, batch, sep = "_"))
+
+# ggplot() +
+#   geom_point(data = pd, aes(x = lag_max_dist, y = diff_area_pp_y_norm_gdd), alpha = 1) +
+#   geom_smooth(data = pd, aes(x = lag_max_dist, y = diff_area_pp_y_norm_gdd)) +
+#   geom_smooth(data = pd, method = "lm", aes(x = lag_max_dist, y = diff_area_pp_y_norm_gdd))
+
+# Fit a quantile regression model
+pdat <- pd %>% 
+  dplyr::select(plot_UID, leaf_nr, lesion_nr, 
+                diff_area_pp_y_norm_gdd,
+                lag_variance_dist, 
+                lag_max_dist, 
+                lag_min_l_density) %>% 
+  dplyr::rename(diff = "diff_area_pp_y_norm_gdd") %>% 
+  pivot_longer(cols = 5:7) %>% 
+  filter(complete.cases(.))
+
+# can fit loess only if sufficient data is available
+# must limit the range of the predictor variable slightly 
+# this is means ignoring few extremely large values perimeter values (keep 99%)
+lims <- pdat %>%
+  group_by(name) %>% 
+  summarise(
+    x_min = quantile(value, 0),
+    x_max = quantile(value, 0.975)
+  )
+pdat_sub <- pdat %>% 
+  left_join(., lims, by = "name") %>% 
+  filter(value >= x_min & value <= x_max)
+
+qr_models <- pdat_sub %>% 
+  group_by(name) %>% nest() %>% ungroup() %>% 
+  mutate(linear_q = purrr::map(data, ~ rq(diff ~ value, data = .)), 
+         loess_q = purrr::map(data, ~ lprq(x = .$value, 
+                                           y = .$diff, 
+                                           h = (range(.$value)[2]-range(.$value)[1])/20, 
+                                           tau = .5)),
+         new_data = purrr::map(data, ~ data.frame(value = seq(min(.$value), max(.$value), length.out = 1000))))
+
+# Make predictions for both QR and LPQR models
+qr_models2 <- qr_models %>% 
+  mutate(
+    predicted_qr = purrr::map2(linear_q, new_data, ~ predict(.x, newdata = .y)),
+    predicted_lpqr = purrr::map2(loess_q, new_data, ~ {
+      fit_values <- .x$fv
+      predict_values <- approx(.x$xx, fit_values, xout = .y$value)$y
+      return(predict_values)
+    })
+  )
+
+qr_models3 <- qr_models2 %>% 
+  mutate(pseudo_r2 = purrr::map2(data, linear_q, ~ compute_pseudoR2(.x, response = "diff", qr_model = .y)))
+
+qr_models4 <- qr_models3 %>% 
+  mutate(r2 = map_dbl(pseudo_r2, 1))
+
+predictions <- qr_models2 %>% 
+  dplyr::select(name, new_data, predicted_qr, predicted_lpqr) %>% 
+  unnest(cols = c(new_data, predicted_qr, predicted_lpqr))
+
+# New facet label names for direction variable
+dir_labs <- c("Maximum Pyn Distance", "Minimum Pycn Density on Perimeter", "Variance Pycn Distance")
+names(dir_labs) <- c("lag_max_dist", "lag_min_l_density", "lag_variance_dist")
+
+p2 <- ggplot() +
+  geom_point(data = pdat_sub, aes(x = value, y = diff), alpha = 0.02) +
+  # qr loess
+  geom_line(data = predictions, aes(y = predicted_lpqr, x = value), color = "green") +
+  # QR linear
+  geom_line(data = predictions, aes(y = predicted_qr, x = value), color = "yellow") +
+  geom_abline(intercept = 0, slope = 0, lty = 2) +
+  scale_y_continuous(name = bquote("Lesion growth (" ~ A[t[1]] - A[t[0]] ~ ")")) +
+  scale_x_continuous(name = "Feature Value") +
+  geom_text(data = qr_models4, aes(x = Inf, y = Inf, label = paste0("R²: ", round(r2, 2))),
+            hjust = 1.2, vjust = 2, inherit.aes = FALSE) +
+  facet_wrap(~name, scales = "free_x", labeller = labeller(name = dir_labs)) +
+  theme(
+    panel.background = element_rect(fill = "#E5E5E5"),
+    legend.position = "None",
+    plot.title = element_text(face = "bold")
+  )
+png(paste0(figure_path, "dist_diff.png"), width = 9, height = 3.5, units = 'in', res = 400)
+plot(p2)
+dev.off()
+
+# dependency on genotype and batch
+pd <- pd %>% 
+  mutate(year = ifelse(exp_UID == "ESWW007", "2023", "2024"))
+pd$batch_UID = as.factor(paste(pd$year, pd$batch, sep = "_"))
+
+a <- ggplot(data = pd) +
+  geom_boxplot(aes(x = batch_UID, y = log(lag_max_dist), fill = as.factor(batch))) +
+  scale_fill_manual(
+    values = c("1" = colors[1], "2" = colors[2])) +
+  scale_x_discrete(name = "Batch") +
+  scale_y_continuous(name = "log(Maximum Distance") +
+  ggtitle("A") +
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+        legend.position = "None", 
+        axis.text.x = element_text(),
+        plot.title = element_text(face = "bold"))
+
+b <- ggplot(data = pd) +
+  geom_boxplot(aes(x = genotype_name, y = log(lag_max_dist)), fill = "#1E88E5", alpha = 0.4) +
+  geom_jitter(aes(x = genotype_name, y = log(lag_max_dist), fill = "grey95"), alpha = 0.025) +
+  ggtitle("B") +
+  xlab("Host cultivar") +
+  scale_y_continuous(name = "log(Maximum Distance") +
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+        legend.position = "None",
+        axis.text.x = element_text(angl = 45, hjust = 1),
+        plot.title = element_text(face = "bold"))
+
+p <- gridExtra::grid.arrange(a, b, nrow = 1, widths = c(1, 2))
+
+png(paste0(figure_path, "pycn_patterns.png"), width = 8, height = 4, units = 'in', res = 400)
+plot(p)
+dev.off()
+
+cordat <- pd %>% 
+  dplyr::select(lag_max_dist, lag_variance_dist, lag_mean_dist, lag_median_dist)
+M<-cor(cordat, use = "pairwise.complete.obs")
+
+corrplot(M, addCoef.col = "black", tl.col="black", tl.srt=45,
+         method = "color", type="upper", diag=FALSE, 
+         number.cex = 1, tl.cex= 1)
+
+mod <- lm(log(lag_max_dist) ~ genotype_name+batch_UID, data = pd)
+summary(mod)
+hist(residuals(mod), breaks = 30, main = "Histogram of Residuals")
+
+anova(mod)
+plot(mod)
+
 
 # ============================================================================== -
 
@@ -1088,395 +1320,6 @@ for (k1 in 1:(p-1)) {
 png(paste0(figure_path, "area_age_peri.png"), width = 6, height = 6, units = 'in', res = 400)
 p1
 dev.off()
-
-# ============================================================================== -
-# 6) Environmental main effects ----
-# ============================================================================== -
-
-mdat <- readRDS(paste0(data_path, "subset_step2.rds")) %>% 
-  extract_covars_from_nested("design", "genotype_name") %>% 
-  mutate(batch_UID = paste(exp_UID, batch, sep = "_")) %>% 
-  dplyr::rename(diff = "diff_area_pp_y_norm_chr")
-
-pdat <- mdat %>% 
-  dplyr::select(plot_UID, leaf_nr, lesion_nr, 
-                diff, 
-                cv_interval_rh, 
-                mean_interval_rh,
-                cv_interval_temp, 
-                mean_interval_temp) %>% 
-  pivot_longer(cols = 5:8)
-
-lims <- pdat %>%
-  group_by(name) %>%
-  summarise(
-    x_min = quantile(value, 0.005),
-    x_max = quantile(value, 0.995),
-    y_min = quantile(diff, 0.005),
-    y_max = quantile(diff, 0.995)
-  )
-
-pdat_sub <- pdat %>% 
-  left_join(lims, by = c("name")) %>%
-  filter(value >= x_min & value <= x_max & diff >= y_min & diff <= y_max) %>% 
-  group_by(name)
-
-# Fit a quantile regression model
-qr_models <- pdat_sub %>% 
-  group_by(name) %>% nest() %>% ungroup() %>% 
-  mutate(linear_q = purrr::map(data, ~ rq(diff ~ value, data = .)), 
-         # loess_q = purrr::map(data, ~ lprq(x = .$value, y = .$diff, m = nrow(.)/10, h = 0.1*range(.$value), tau = .5)),
-         new_data = purrr::map(data, ~ data.frame(value = seq(min(.$value), max(.$value), length.out = 1000))))
-
-# Make predictions for both QR and LPQR models
-qr_models2 <- qr_models %>% 
-  mutate(
-    predicted_qr = purrr::map2(linear_q, new_data, ~ predict(.x, newdata = .y)),
-    # predicted_lpqr = purrr::map2(loess_q, new_data, ~ {
-    #   fit_values <- .x$fv
-    #   predict_values <- approx(.x$xx, fit_values, xout = .y$value)$y
-    #   return(predict_values)
-    # })
-  )
-
-qr_models3 <- qr_models2 %>% 
-  mutate(pseudo_r2 = purrr::map2(data, linear_q, ~ compute_pseudoR2(.x, response = "diff", qr_model = .y)))
-
-qr_models4 <- qr_models3 %>% 
-  mutate(r2 = map_dbl(pseudo_r2, 1))
-
-predictions <- qr_models2 %>% 
-  dplyr::select(name, new_data, predicted_qr) %>% 
-  unnest(cols = c(new_data, predicted_qr))
-
-# New facet label names for direction variable
-dir_labs <- c("CV Relative Humidity", "CV Temperature", "Mean Temperature", "Mean Relative Humidity")
-names(dir_labs) <- c("cv_interval_rh", "cv_interval_temp", "mean_interval_temp", "mean_interval_rh")
-
-p <- ggplot() +
-  geom_point(data = pdat_sub, aes(x = value, y = diff), alpha = 0.02) +
-  # # qr loess
-  # geom_line(data = predictions, aes(y = predicted_lpqr, x = value), color = "green", size = 1) +
-  # QR linear
-  geom_line(data = predictions, aes(y = predicted_qr, x = value), size = 1, color = "yellow") +
-  geom_abline(intercept = 0, slope = 0, lty = 2) +
-  scale_y_continuous(
-    name = bquote("Lesion growth (" ~ A[t[1]] - A[t[0]] ~ ")")) +
-  scale_x_continuous(name = "Environmental covariate value") +
-  facet_wrap(~name,
-             labeller = labeller(name = dir_labs),
-             scales = "free_x") +
-  geom_text(data = qr_models4, aes(x = Inf, y = Inf, label = paste0("Pseudo-R²: ", round(r2, 2))),
-            hjust = 1.1, vjust = 1.1, inherit.aes = FALSE) +
-  theme(panel.background = element_rect(fill = "#E5E5E5"),
-        panel.spacing = unit(1.5, "lines")) 
-
-png(paste0(figure_path, "covars_regr_univariate.png"), width = 6, height = 5, units = 'in', res = 400)
-plot(p)
-dev.off()
-
-# ============================================================================== -
-# Lesion age main effect
-# ============================================================================== -
-
-mdat <- readRDS(paste0(data_path, "subset_step2.rds"))
-
-# df for predictions
-new_preds <- mdat %>% ungroup() %>% 
-  do(., data.frame(
-    lesion_age_gdd = seq(round(min(as.numeric(.$lesion_age_gdd))), max(as.numeric(.$lesion_age_gdd)), by = 0.2),
-    stringsAsFactors = FALSE)
-  )
-
-# linear quantile regression
-rqmodel <- rq(diff_area_pp_y_norm_gdd ~ lesion_age_gdd, tau = .5, data = mdat)
-
-# loess
-fit <- lprq(mdat$lesion_age_gdd, mdat$diff_area_pp_y_norm_gdd, m = nrow(new_preds), h = 3, tau = .5)
-rq_yy <- predict(rqmodel, newdata = new_preds)
-
-## Fit models ================================================================== -
-
-x = "lesion_age_gdd"
-y = "diff_area_pp_y_norm_gdd"
-
-fits <- mdat %>% nest() %>% 
-  mutate(linear_q = purrr::map(.x = data, .f = linear_quantile, x=x, y=y),
-         nls_q_exp = purrr::map(.x = data, .f = nls_quantile_exp, n_samples = 300, x=x, y=y)) %>%  
-  tidyr::pivot_longer(cols = linear_q:nls_q_exp, names_to = "type", values_to = "fit")
-
-saveRDS(fits, paste0(data_path, "model_fits.rds"))
-fits <- readRDS(paste0(data_path, "model_fits.rds"))
-
-# get pseudo-r2
-resid_fit <- residuals(fits$fit[[2]])
-rho_tau <- function(u, tau) {
-  u * (tau - (u < 0))
-}
-numerator <- sum(rho_tau(resid_fit, tau=.5))
-denominator <- sum(rho_tau(mdat[[y]] - median(mdat[[y]]), tau=.5))
-pseudo_R2 <- 1 - numerator / denominator
-
-pdat <- fits %>% 
-  mutate(preds = purrr::map(fit, broom::augment, newdata = new_preds))
-preds <- pdat %>% dplyr::select(type, preds) %>% unnest(preds) %>% 
-  dplyr::filter(type ==  "nls_q_exp")
-pd <- pdat %>% 
-  dplyr::filter(type ==  "nls_q_exp") %>%  ## only one dataset needed
-  dplyr::select(type, data) %>% unnest(data)
-
-lims <- mdat %>%
-  summarise(
-    y_min = quantile(diff_area_pp_y_norm_gdd, 0.005),
-    y_max = quantile(diff_area_pp_y_norm_gdd, 0.995)
-  )
-
-p1 <- ggplot() +
-  geom_point(data = pd, aes(x = lesion_age_gdd, y = diff_area_pp_y_norm_gdd), alpha = 0.025) +
-  # add loess fit
-  geom_line(aes(x = fit$xx, y = fit$fv), color = "green") +
-  # add linear and non-linear fit
-  geom_line(data = preds, aes(x = lesion_age_gdd, y = .fitted), color = "yellow") +
-  scale_x_continuous(limits = c(0, 50)) +
-  scale_y_continuous(
-    name = bquote("Lesion growth (" ~ A[t[1]] - A[t[0]] ~ ")"),
-    # limits = c(lims$y_min, lims$y_max),
-    limits = c(-0.01, 0.06)
-  ) +
-  geom_abline(intercept = 0, slope = 0, lty = 2) +
-  geom_text(aes(x = Inf, y = Inf, label = paste0("Pseudo-R²: ", round(pseudo_R2, 2))),
-            hjust = 1.2, vjust = 2, inherit.aes = FALSE) +
-  ggtitle("A") +
-  theme(
-    legend.position = "None",
-    panel.background = element_rect(fill = "#E5E5E5"),
-    plot.title = element_text(face = "bold")
-  ) + 
-  xlab(bquote("Lesion age at" ~t[1]~"(effective)"))
-
-# p <- ggMarginal(p, type = "density", fill = "gray", alpha = 0.5)
-
-png(paste0(figure_path, "05_fits_growth_age_all_density.png"), width = 7, height = 5, units = 'in', res = 400)
-plot(p1)
-dev.off()
-
-# ============================================================================== -
-# Pycn distance
-# ============================================================================== -
-
-pd <- readRDS(paste0(data_path, "mdat.rds")) %>% 
-  extract_covars_from_nested("design", "genotype_name") %>% 
-  mutate(batch_UID = paste(exp_UID, batch, sep = "_"))
-
-ggplot() +
-  geom_point(data = pd, aes(x = lag_max_dist, y = diff_area_pp_y_norm_gdd), alpha = 1) +
-  geom_smooth(data = pd, aes(x = lag_max_dist, y = diff_area_pp_y_norm_gdd)) +
-  geom_smooth(data = pd, method = "lm", aes(x = lag_max_dist, y = diff_area_pp_y_norm_gdd))
-
-# ============================================================================== - 
-
-# Fit a quantile regression model
-pdat <- pd %>% 
-  mutate(dist = lag_max_dist) %>% 
-  filter(!is.na(dist)) 
-
-lims <- pdat %>%
-  summarise(
-    x_min = quantile(dist, 0.005),
-    x_max = quantile(dist, 0.995),
-    y_min = quantile(diff_area_pp_y_norm_gdd, 0.005),
-    y_max = quantile(diff_area_pp_y_norm_gdd, 0.995)
-  )
-
-pdat_sub <- pdat %>% 
-  filter(diff_area_pp_y_norm_gdd >= lims$y_min & diff_area_pp_y_norm_gdd <= lims$y_max & dist >= lims$x_min & dist <= lims$x_max)
-
-qr_models <- pdat_sub %>% 
-  # sample_n(5000) %>%
-  nest() %>% ungroup() %>% 
-  mutate(linear_q = purrr::map(data, ~ rq(diff_area_pp_y_norm_gdd ~ dist, data = .)), 
-         loess_q = purrr::map(data, ~ lprq(x = .$dist, y = .$diff_area_pp_y_norm_gdd, m = nrow(.)/10, h = 0.2*range(.$dist), tau = .5)),
-         new_data = purrr::map(data, ~ data.frame(dist = seq(min(.$dist), max(.$dist), length.out = 1000))))
-
-# Make predictions for both QR and LPQR models
-qr_models2 <- qr_models %>% 
-  mutate(
-    predicted_qr = purrr::map2(linear_q, new_data, ~ predict(.x, newdata = .y)),
-    predicted_lpqr = purrr::map2(loess_q, new_data, ~ {
-      fit_values <- .x$fv
-      predict_values <- approx(.x$xx, fit_values, xout = .y$dist)$y
-      return(predict_values)
-    })
-  )
-
-qr_models3 <- qr_models2 %>% 
-  mutate(pseudo_r2 = purrr::map2_dbl(data, linear_q, ~ compute_pseudoR2(.x, response = "diff_area_pp_y_norm_gdd", qr_model = .y)))
-
-predictions <- qr_models2 %>% 
-  dplyr::select(new_data, predicted_qr, predicted_lpqr) %>% 
-  unnest(cols = c(new_data, predicted_qr, predicted_lpqr))
-
-# New facet label names for direction variable
-dir_labs <- c("CV Relative Humidity", "CV Temperature", "Mean Temperature", "Mean Relative Humidity")
-names(dir_labs) <- c("cv_interval_rh", "cv_interval_temp", "mean_interval_temp", "mean_interval_rh")
-
-p2 <- ggplot() +
-  geom_point(data = pdat_sub, aes(x = dist, y = diff_area_pp_y_norm_gdd), alpha = 0.02) +
-  # qr loess
-  geom_line(data = predictions, aes(y = predicted_lpqr, x = dist), color = "green") +
-  # QR linear
-  geom_line(data = predictions, aes(y = predicted_qr, x = dist), color = "yellow") +
-  geom_abline(intercept = 0, slope = 0, lty = 2) +
-  scale_y_continuous(limits = c(-0.01, 0.06),
-                     # limits = c(lims$y_min, lims$y_max),
-                     name = bquote("Lesion growth (" ~ A[t[1]] - A[t[0]] ~ ")")) +
-  scale_x_continuous(limits = c(lims$x_min, lims$x_max),
-                     name = "Maximum distance") +
-  geom_text(data = qr_models3, aes(x = Inf, y = Inf, label = paste0("Pseudo-R²: ", round(pseudo_r2, 2))),
-            hjust = 1.2, vjust = 2, inherit.aes = FALSE) +
-  ggtitle("B") +
-  theme(
-    panel.background = element_rect(fill = "#E5E5E5"),
-    axis.title.y = element_blank(),
-    legend.position = "None",
-    plot.title = element_text(face = "bold"),
-    axis.text.y = element_blank()
-  )
-
-p2
-
-png(paste0(figure_path, "dist_diff.png"), width = 5, height = 4, units = 'in', res = 400)
-plot(p2)
-dev.off()
-
-# SHOW AREA EFFECT ON GROWTH FOR Y ONLY
-mdat0 <- readRDS(paste0(data_path, "mdat.rds"))
-
-pdat <- mdat0 %>% 
-  dplyr::select(plot_UID, leaf_nr, lesion_nr, 
-                area,
-                diff_area_pp_y_norm_gdd) %>% 
-  pivot_longer(cols = 5:5)
-
-# remove nas and non-finites
-pdat <- pdat %>%
-  filter(!is.na(value) & !is.na(area) & 
-           is.finite(value) & is.finite(area))
-
-facet_limits <- pdat %>%
-  group_by(name) %>%
-  summarise(
-    x_min = quantile(value, 0.005),
-    x_max = quantile(value, 0.995),
-    y_min = quantile(area, 0.005),
-    y_max = quantile(area, 0.995)
-  )
-
-pdat_sub <- pdat %>% 
-  left_join(facet_limits, by = c("name")) %>%
-  filter(value >= x_min & value <= x_max & area >= y_min & area <= y_max)
-
-# Fit a quantile regression model
-qr_models <- pdat_sub %>% 
-  group_by(name) %>% nest() %>% ungroup() %>% 
-  mutate(linear_q = purrr::map(data, ~ rq(value ~ area, data = .)), 
-         loess_q = purrr::map(data, ~ lprq(x = .$area, y = .$value, m = nrow(.)/100, h = 10, tau = .5)),
-         new_data = purrr::map(data, ~ data.frame(area = seq(min(.$area), max(.$area), length.out = 1000))))
-
-# Make predictions for both QR and LPQR models
-qr_models2 <- qr_models %>% 
-  mutate(
-    predicted_qr = purrr::map2(linear_q, new_data, ~ predict(.x, newdata = .y)),
-    predicted_lpqr = purrr::map2(loess_q, new_data, ~ {
-      fit_values <- .x$fv
-      predict_values <- approx(.x$xx, fit_values, xout = .y$area)$y
-      return(predict_values)
-    })
-  )
-
-qr_models3 <- qr_models2 %>% 
-  mutate(pseudo_r2 = purrr::map2_dbl(data, linear_q, ~ compute_pseudoR2(.x, response = "value", qr_model = .y)))
-
-predictions <- qr_models2 %>% 
-  dplyr::select(name, new_data, predicted_qr, predicted_lpqr) %>% 
-  unnest(cols = c(new_data, predicted_qr, predicted_lpqr))
-
-p0 <- ggplot() +
-  geom_point(data = pdat_sub, aes(x = area, y = value), alpha = 0.02) +
-  # # qr loess
-  geom_line(data = predictions, aes(y = predicted_lpqr, x = area), color = "green") +
-  # QR linear
-  geom_line(data = predictions, aes(y = predicted_qr, x = area), color = "yellow") +
-  geom_abline(intercept = 0, slope = 0, lty = 2) +
-  scale_y_continuous(
-    limits = c(-0.01, 0.06),
-    name = bquote("Lesion growth (" ~ A[t[1]] - A[t[0]] ~ ")")) +
-  scale_x_continuous(limits = c(0, 50), 
-                     name = bquote("Lesion area (mm" ^2~")")) +
-  geom_text(data = qr_models3, aes(x = Inf, y = Inf, label = paste0("Pseudo-R²: ", round(pseudo_r2, 2))),
-            hjust = 1.2, vjust = 2, inherit.aes = FALSE) +
-  ggtitle("C") +
-  theme(panel.background = element_rect(fill = "#E5E5E5"),
-        axis.title.y = element_blank(),
-        plot.title = element_text(face = "bold"),
-        axis.text.y = element_blank())
-
-# combine lesion age and pycn dist
-p <- gridExtra::grid.arrange(p1, p2, p0, nrow = 1, widths = c(1.1, 0.95, 0.95))
-
-png(paste0(figure_path, "age_dist_area_diff.png"), width = 8, height = 4, units = 'in', res = 400)
-plot(p)
-dev.off()
-
-# ============================================================================== -
-
-ggplot(data = pd) +
-  geom_boxplot(aes(x = genotype_name, y = log(lag_max_dist)))
-
-a <- ggplot(data = pd) +
-  geom_boxplot(aes(x = batch_UID, y = log(lag_max_dist), fill = as.factor(batch)), alpha = 0.4) +
-  scale_fill_manual(
-    values = c("1" = col[1], "2" = col[2])) +
-  ggtitle("A") +
-  theme_bw() +
-  theme(panel.grid = element_blank(),
-        legend.position = "None", 
-        axis.text.x = element_text(angl = 45, hjust = 1),
-        plot.title = element_text(face = "bold"))
-
-b <- ggplot(data = pd) +
-  geom_boxplot(aes(x = genotype_name, y = log(lag_max_dist), fill = "grey95"), alpha = 0.4) +
-  geom_jitter(aes(x = genotype_name, y = log(lag_max_dist), fill = "grey95"), alpha = 0.025) +
-  ggtitle("B") +
-  scale_fill_manual(
-    values = c("1" = col[1], "2" = col[2])) +
-  xlab("Host cultivar") +
-  theme_bw() +
-  theme(panel.grid = element_blank(),
-        legend.position = "None",
-        axis.text.x = element_text(angl = 45, hjust = 1),
-        plot.title = element_text(face = "bold"))
-
-p <- gridExtra::grid.arrange(a, b, nrow = 1, widths = c(1, 2))
-
-png(paste0(figure_path, "pycn_patterns.png"), width = 8, height = 4, units = 'in', res = 400)
-plot(p)
-dev.off()
-
-cordat <- pd %>% 
-  dplyr::select(lag_max_dist, lag_variance_dist, lag_mean_dist, lag_median_dist)
-M<-cor(cordat, use = "pairwise.complete.obs")
-
-corrplot(M, addCoef.col = "black", tl.col="black", tl.srt=45,
-         method = "color", type="upper", diag=FALSE, 
-         number.cex = 1, tl.cex= 1)
-
-mod <- lm(log(lag_max_dist) ~ genotype_name+batch_UID, data = pd)
-summary(mod)
-hist(residuals(mod), breaks = 30, main = "Histogram of Residuals")
-
-anova(mod)
-plot(mod)
 
 # ============================================================================== -
 # Asymptomatic

@@ -87,6 +87,17 @@ compute_pseudoR2 <- function(data, response, qr_model){
   return(list(pseudo_r2, p))
 }
 
+compute_pseudoR2_nl <- function(obj, response){
+  resid_fit <- residuals(obj)
+  rho_tau <- function(u, tau) {
+    u * (tau - (u < 0))
+  }
+  numerator <- sum(rho_tau(resid_fit, tau=.5))
+  denominator <- sum(rho_tau(mdat[[response]] - median(mdat[[response]]), tau=.5))
+  pseudo_R2 <- 1 - numerator / denominator
+  return(pseudo_R2)
+}
+
 # get p values using standard error estimates from bootstrapping
 get_pval <- function(data, qr_model){
   qr_summary <- summary(qr_model, se = "boot", R = 50) # Use bootstrapped standard errors
