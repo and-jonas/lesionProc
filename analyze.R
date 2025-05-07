@@ -1,36 +1,39 @@
 
-# HEADER ----
+#=============================================================================== -
+
+#HEADER ----
+
+# Author: Jonas Anderegg, ETH Zürich
+# Copyright (C) 2025  ETH Zürich, Jonas Anderegg (jonas.anderegg@usys.ethz.ch)
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#  
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <http://www.gnu.org/licenses/>.
+
+#=============================================================================== -
 
 rm(list = ls())
 Sys.getenv("R_LIBS")
 .libPaths("T:/R4Userlibs")
-list.of.packages <- c("tidyverse", "data.table", "caret", 
-                      "ggsci", "ggpmisc", "ggpubr", "GGally", "quantreg", "progress",
-                      "scam")
+
+list.of.packages <- c("tidyverse", "gridExtra", "ggpubr", "quantreg")
 
 new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages, dependencies = TRUE, repos = 'https://stat.ethz.ch/CRAN/')
 
-library(data.table)
-library(lubridate)
-library(caret)
-library(ggsci)
-library(ggpmisc)
-library(ggpubr)
-library(GGally)
-library(gridExtra)
-library(readxl)
-library(nls.multstart)
-library(quantreg)
-library(progress)
-library(ggExtra)
-library(furrr)
-library(tictoc)
-library(lme4)
-library(nlme)
-library(lmerTest)
-library(emmeans)
 library(tidyverse)
+library(gridExtra)
+library(ggpubr)
+library(quantreg)
 
 source("C:/Users/anjonas/RProjects/lesionProc/utils.R")
 
@@ -186,9 +189,9 @@ subset <- subset %>%
   dplyr::select(-hd)
 
 # the symptomatic duration and asymptomatic duration must add up to leaf_age for all measurements
-ss <- subset %>% dplyr::select(leaf_age, symptomatic_duration, asymptomatic_duration)
-ss$totdur <- ss$symptomatic_duration + ss$asymptomatic_duration
-plot(ss$leaf_age~ss$totdur)
+test <- subset %>% dplyr::select(leaf_age, symptomatic_duration, asymptomatic_duration)
+test$totdur <- test$symptomatic_duration + test$asymptomatic_duration
+plot(test$leaf_age~test$totdur)
 
 # add free perimeters as fractions of the total perimeter
 subset$frac_x_perimeter_f <- subset$x_perimeter_f / subset$x_perimeter
@@ -228,6 +231,8 @@ df_covar_lookup <- df_covar_lookup %>%
 
 # Join temperature course id to measurements
 subset <- left_join(subset, df_covar_lookup, by = "covar_course_id")
+
+# calculate effective thermal time
 df <- subset %>% ungroup() %>%  
   mutate(lesion_age_gdd = purrr::map_dbl(
     covar_course, 
@@ -541,6 +546,37 @@ dev.off()
 
 # ============================================================================== -
 
+# a small subset of lesions for illustrative plot
+
+colors <- colorRampPalette(RColorBrewer::brewer.pal(8, "Dark2"))(10)  # get 15 interpolated colors
+
+sample_dat <- data %>% 
+  filter(leaf_UID == "ESWW0070020_1") %>% 
+  filter(first_timestamp_lesion <= "2023-06-02 17:24:20 UTC") %>% 
+  dplyr::select(plot_UID, leaf_nr, lesion_nr, lesion_UID, area, timestamp, first_timestamp_lesion) %>% 
+  dplyr::filter(lesion_UID != "ESWW0070020_1_3")
+
+P <- ggplot() + geom_line(data = sample_dat, 
+          aes(x = timestamp, y = area, 
+              group=interaction(plot_UID, leaf_nr, lesion_nr), color = lesion_UID),
+          alpha = 1, linewidth = 0.33) +
+  geom_point(data = sample_dat[!is.na(sample_dat$area),], 
+             aes(x = timestamp, y = area, , color = lesion_UID,
+                 group=interaction(plot_UID, leaf_nr, lesion_nr)),  alpha = 1) +
+  scale_y_continuous(name = "Lesion Area") +
+  scale_x_datetime(name = "Date") +
+  scale_color_manual(values = colors) +
+  theme_bw() +
+  theme(legend.position = "None",
+        panel.grid = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_blank())
+png(paste0(figure_path, "EXAMPLE.png"), width = 3.5, height = 3.5, units = 'in', res = 400)
+plot(P)
+dev.off()
+
+# ============================================================================== -
+
 subset <- readRDS(paste0(data_path, "subset_step2.rds"))
 
 # Sort and compute percentiles
@@ -564,6 +600,7 @@ plot(p)
 dev.off()
 
 # plot l_density vs. p_density
+# density in pycnidiation area must be >= density in lesion - OK
 p <- ggplot(subset) +
   geom_point(aes(x = mean_l_density, y = mean_p_density)) +
   geom_abline(intercept = 0, slope = 1, color = "red") +
@@ -607,40 +644,40 @@ mdat <- pdat %>%
   left_join(., loess_limits, by = c("perimeter", "perimeter_type")) %>% 
   filter(value >= x_min & value <= x_max)
 
-# # Fit a median quantile regression model
-# qr_models <-  mdat%>% 
-#   group_by(perimeter, perimeter_type) %>% nest() %>% ungroup() %>% 
-#   mutate(
-#     linear_q = purrr::map(data, ~ rq(diff_area_norm_gdd ~ poly(value, 2), data = .)),
-#     loess_q = purrr::map(data, ~ lprq(x = .$value,
-#                                       y = .$diff_area_norm_gdd,
-#                                       h = (range(.$value)[2]-range(.$value)[1])/20,  # 25 works, with m set to default value,
-#                                       tau = .5)),
-#     new_data = purrr::map(data, ~ data.frame(value = seq(min(.$value), max(.$value), length.out = 100)))
-#   )
-# 
-# # Make predictions for both QR and LPQR models
-# qr_models2 <- qr_models %>% 
-#   mutate(
-#     predicted_qr = purrr::map2(linear_q, new_data, ~ predict(.x, newdata = .y)),
-#     predicted_lpqr = purrr::map2(loess_q, new_data, ~ {
-#       fit_values <- .x$fv
-#       predict_values <- approx(.x$xx, fit_values, xout = .y$value)$y
-#       return(predict_values)
-#     })
-#   )
-# 
-# # add pseudo R2
-# qr_models3 <- qr_models2 %>% 
-#   mutate(pseudo_r2 = purrr::map2(data, linear_q, ~ compute_pseudoR2(.x, response = "diff_area_norm_gdd", qr_model = .y)))
-# 
-# # extract pseudo R2
-# qr_models4 <- qr_models3 %>% 
-#   mutate(r2 = map_dbl(pseudo_r2, 1))
-# # save
-# saveRDS(qr_models4, paste0(data_path, "fits_perimeters.rds"))
+# Fit a median quantile regression model
+qr_models <-  mdat%>%
+  group_by(perimeter, perimeter_type) %>% nest() %>% ungroup() %>%
+  mutate(
+    linear_q = purrr::map(data, ~ rq(diff_area_norm_gdd ~ poly(value, 2), data = .)),
+    loess_q = purrr::map(data, ~ lprq(x = .$value,
+                                      y = .$diff_area_norm_gdd,
+                                      h = (range(.$value)[2]-range(.$value)[1])/20,  # 25 works, with m set to default value,
+                                      tau = .5)),
+    new_data = purrr::map(data, ~ data.frame(value = seq(min(.$value), max(.$value), length.out = 100)))
+  )
 
+# Make predictions for both QR and LPQR models
+qr_models2 <- qr_models %>%
+  mutate(
+    predicted_qr = purrr::map2(linear_q, new_data, ~ predict(.x, newdata = .y)),
+    predicted_lpqr = purrr::map2(loess_q, new_data, ~ {
+      fit_values <- .x$fv
+      predict_values <- approx(.x$xx, fit_values, xout = .y$value)$y
+      return(predict_values)
+    })
+  )
 
+# add pseudo R2
+qr_models3 <- qr_models2 %>%
+  mutate(pseudo_r2 = purrr::map2(data, linear_q, ~ compute_pseudoR2(.x, response = "diff_area_norm_gdd", qr_model = .y)))
+
+# extract pseudo R2
+qr_models4 <- qr_models3 %>%
+  mutate(r2 = map_dbl(pseudo_r2, 1))
+# save
+saveRDS(qr_models4, paste0(data_path, "fits_perimeters.rds"))
+
+# load
 qr_models4 <- readRDS(paste0(data_path, "fits_perimeters.rds"))
 
 # extract predictions
@@ -688,10 +725,15 @@ dev.off()
 
 subset <- readRDS(paste0(data_path, "subset_step2.rds"))
 
+# subsample initial detections
 init <- subset %>% dplyr::filter(lag_lesion_age == 0)
+
+# average over all intervals
 avg <- subset %>% group_by(lesion_UID) %>% 
   summarise(mean_delta = mean(diff_area_pp_y_norm_gdd),
             mean_age = mean(lesion_age))
+
+# merge
 both <- left_join(init, avg, by = "lesion_UID")
 both <- both %>% extract_covars_from_nested("design", "genotype_name")
 
@@ -699,6 +741,13 @@ both <- both %>% extract_covars_from_nested("design", "genotype_name")
 # very sparse data at large area
 ggplot(both) +
   geom_point(aes(x = area, y=mean_delta))
+ggplot(both) +
+  geom_boxplot(aes(x = genotype_name, y = log(area)))
+
+# examine genotype effect
+mod <- lm(log(area) ~ genotype_name, data = both)
+summary(mod)
+aov(mod)
 
 # can fit loess only if sufficient data is available
 # must limit the range of the predictor variable slightly 
@@ -816,45 +865,47 @@ pdat <- pdat %>%
   left_join(loess_limits, by = c("name")) %>%
   filter(area >= x_min & area <= x_max)
 
-# # Fit a quantile regression model
-# qr_models <- pdat %>% 
-#   group_by(name) %>% nest() %>% ungroup() %>% 
-#   mutate(
-#     linear_q = purrr::map(data, ~ rq(value ~ area, data = .)),
-#     linear_q_sqrt = purrr::map(data, ~ rq(value ~ area + sqrt(area), data = .)),
-#     loess_q = purrr::map(data, ~ lprq(x = .$area, 
-#                                       y = .$value, 
-#                                       h = (range(.$area)[2]-range(.$area)[1])/20, 
-#                                       tau = .5)),
-#     new_data = purrr::map(data, ~ data.frame(area = seq(min(.$area), max(.$area), length.out = 1000)))
-#   )
-# 
-# # compare linear and sqrt-transformed 
-# AIC(qr_models$linear_q[[1]])
-# AIC(qr_models$linear_q_sqrt[[1]])
-# 
-# # Make predictions for both QR and LPQR models
-# qr_models2 <- qr_models %>% 
-#   mutate(
-#     predicted_qr = purrr::map2(linear_q, new_data, ~ predict(.x, newdata = .y)),
-#     predicted_qr_sqrt = purrr::map2(linear_q_sqrt, new_data, ~ predict(.x, newdata = .y)),
-#     predicted_lpqr = purrr::map2(loess_q, new_data, ~ {
-#       fit_values <- .x$fv
-#       predict_values <- approx(.x$xx, fit_values, xout = .y$area)$y
-#       return(predict_values)
-#     })
-#   )
-# 
-# # add pseudo R2
-# qr_models3 <- qr_models2 %>% 
-#   mutate(pseudo_r2 = purrr::map2(data, linear_q_sqrt, ~ compute_pseudoR2(.x, response = "value", qr_model = .y)))
-# 
-# # extract pseudo R2
-# qr_models4 <- qr_models3 %>% 
-#   mutate(r2 = map_dbl(pseudo_r2, 1))
-# 
-# # save
-# saveRDS(qr_models4, paste0(data_path, "fits_area.rds"))
+# Fit a quantile regression model
+qr_models <- pdat %>%
+  group_by(name) %>% nest() %>% ungroup() %>%
+  mutate(
+    linear_q = purrr::map(data, ~ rq(value ~ area, data = .)),
+    linear_q_sqrt = purrr::map(data, ~ rq(value ~ area + sqrt(area), data = .)),
+    loess_q = purrr::map(data, ~ lprq(x = .$area,
+                                      y = .$value,
+                                      h = (range(.$area)[2]-range(.$area)[1])/20,
+                                      tau = .5)),
+    new_data = purrr::map(data, ~ data.frame(area = seq(min(.$area), max(.$area), length.out = 1000)))
+  )
+
+# compare linear and sqrt-transformed
+AIC(qr_models$linear_q[[1]])
+AIC(qr_models$linear_q_sqrt[[1]])
+
+# Make predictions for both QR and LPQR models
+qr_models2 <- qr_models %>%
+  mutate(
+    predicted_qr = purrr::map2(linear_q, new_data, ~ predict(.x, newdata = .y)),
+    predicted_qr_sqrt = purrr::map2(linear_q_sqrt, new_data, ~ predict(.x, newdata = .y)),
+    predicted_lpqr = purrr::map2(loess_q, new_data, ~ {
+      fit_values <- .x$fv
+      predict_values <- approx(.x$xx, fit_values, xout = .y$area)$y
+      return(predict_values)
+    })
+  )
+
+# add pseudo R2
+qr_models3 <- qr_models2 %>%
+  mutate(pseudo_r2 = purrr::map2(data, linear_q_sqrt, ~ compute_pseudoR2(.x, response = "value", qr_model = .y)))
+
+# extract pseudo R2
+qr_models4 <- qr_models3 %>%
+  mutate(r2 = map_dbl(pseudo_r2, 1))
+
+# save
+saveRDS(qr_models4, paste0(data_path, "fits_area.rds"))
+
+# load
 qr_models4 <- readRDS(paste0(data_path, "fits_area.rds"))
 
 # extract predictions
@@ -962,6 +1013,12 @@ png(paste0(figure_path, "age_area.png"), width = 3.5, height = 3.5, units = 'in'
 plot(plot)
 dev.off()
 
+# genotype-specific 
+mdat <- mdat %>% extract_covars_from_nested("design", "genotype_name")
+ggplot(mdat)+
+  geom_point(aes(x = lesion_age_gdd, y = area, color = genotype_name), alpha = 0.02) +
+  geom_smooth(aes(x = lesion_age_gdd, y = area, color = genotype_name), method = "lm")
+
 # ============================================================================== -
 # 11) Growth ~ Age ----
 # ============================================================================== -
@@ -1005,11 +1062,11 @@ rq_yy <- predict(rqmodel, newdata = new_preds)
 # fit and save models
 x = "lesion_age_gdd" # independent variable
 y = "diff_area_pp_y_norm_gdd"  # dependent variable
-# fits <- mdat %>% nest() %>%
-#   mutate(linear_q = purrr::map(.x = data, .f = linear_quantile, x=x, y=y),
-#          nls_q_exp = purrr::map(.x = data, .f = nls_quantile_exp, n_samples = 300, x=x, y=y)) %>%
-#   tidyr::pivot_longer(cols = linear_q:nls_q_exp, names_to = "type", values_to = "fit")
-# saveRDS(fits, paste0(data_path, "model_fits.rds"))
+fits <- mdat %>% nest() %>%
+  mutate(linear_q = purrr::map(.x = data, .f = linear_quantile, x=x, y=y),
+         nls_q_exp = purrr::map(.x = data, .f = nls_quantile_exp, n_samples = 300, x=x, y=y)) %>%
+  tidyr::pivot_longer(cols = linear_q:nls_q_exp, names_to = "type", values_to = "fit")
+saveRDS(fits, paste0(data_path, "model_fits.rds"))
 
 # re-load and evaluate models
 fits <- readRDS(paste0(data_path, "model_fits.rds"))
@@ -1385,27 +1442,6 @@ png(paste0(figure_path, "leaf_asymptomatic.png"), width = 6, height = 6, units =
 plot(p)
 dev.off()
 
-# >> to leaves ----
-
-# mdat_leaf <- mdat %>% 
-#   group_by(leaf_id) %>% nest() %>% 
-#   mutate(n = purrr::map_dbl(data, nrow)) %>% 
-#   filter(n > 20)
-# 
-# num_ticks <- n_groups(mdat_leaf)
-# pb <- progress_bar$new(format = "[:bar] :current/:total (:percent) elapsed :elapsed eta :eta",
-#                        total = num_ticks)
-# 
-# # processing serially (slow!)
-# fits <- mdat_leaf%>% 
-#   mutate(
-#     linear_q = purrr::map(.x = data, .f = linear_quantile),
-#     nls_q_exp = purrr::map(.x = data, .f = possibly(~ nls_quantile_exp(.x, n_samples = 500), otherwise = NA))) %>%
-#   tidyr::pivot_longer(cols = linear_q:nls_q_exp, names_to = "type", values_to = "fit")
-# 
-# saveRDS(fits, paste0(data_path, "model_fits_leaves.rds"))
-# processing in parallel: see 'lesion_level_dynamic_par.R' and 'utils.R'
-
 # ============================================================================== -
 
 # load from processed in parallel
@@ -1463,382 +1499,53 @@ png(paste0(figure_path, "parameters_batches.png"), width = 7, height = 5, units 
 plot(p)
 dev.off()
 
-# ============================================================================== -
-
-# >> to batches ----
-
-mdat <- readRDS(paste0(data_path, "mdat.rds"))
-# extract only data for genotypes in both batches
-mdat <- mdat %>% 
-  extract_covars_from_nested(., from="design", "genotype_name") %>% 
-  filter(genotype_name %in% c("FORNO", "BORNEO"))
-
-mdat_batch <- mdat %>% 
-  group_by(batch) %>% nest() %>% 
-  mutate(n = purrr::map_dbl(data, nrow))
-
-# processing serially
-x = "lesion_age_gdd"
-y = "diff_area_norm_gdd_peri_y"
-fits <- mdat_batch%>% 
-  mutate(
-    linear_q = purrr::map(.x = data, .f = linear_quantile, x=x, y=y),
-    nls_q_exp = purrr::map(.x = data, .f = possibly(~ nls_quantile_exp(.x, n_samples = 100, x=x, y=y), otherwise = NA))) %>%
-  tidyr::pivot_longer(cols = linear_q:nls_q_exp, names_to = "type", values_to = "fit")
-
-# saveRDS(fits, paste0(data_path, "model_fits_batches.rds"))
-# fits <- readRDS(paste0(data_path, "model_fits_batches.rds"))
-
-pars <- fits %>% 
-  filter(type == "nls_q_exp") %>% 
-  mutate(pars = purrr::map(fit, get_qr_pars)) %>% unnest(pars)
-
-pdat <- fits %>%
-  filter(type == "nls_q_exp") %>% 
-  mutate(preds = purrr::map(fit, broom::augment, newdata = new_preds))
-
-preds <- pdat %>% dplyr::select(batch, type, preds) %>% unnest(preds)
-pd <- pdat %>% 
-  filter(type == "nls_q_exp") %>%  # only one copy of the data needed
-  dplyr::select(batch, data) %>% unnest(data)
-
-col = pal_jco()(2)
-p <- ggplot() +
-  geom_point(data = pd, aes(x = lesion_age_gdd, y = diff_area_norm_gdd_peri_y, col = as.factor(batch)), alpha = 0.025) +
-  geom_line(data = preds, aes(x = lesion_age_gdd, y = .fitted, group = interaction(type, batch),  col = as.factor(batch))) +
-  scale_y_continuous(
-    name = bquote("GDD-Normalized growth " ~ pp[y]~":" ~ A[t[x]] - A[t[x-1]]),
-    limits = c(-0.01, 0.025),
-  ) +
-  scale_color_manual("batch", values =  col) +
-  guides(colour = guide_legend(override.aes = list(alpha = 1))) +
-  theme_bw(base_family = "Helvetica") +
-  theme(panel.grid = element_blank()) +
-  xlab(bquote("lesion age at" ~t[2]~" (?C days)")) + ylab(bquote("Lesion relative growth: " ~ A[t[x]] / A[t[x-1]])) 
-png(paste0(figure_path, "06_fits_growth_age_batches.png"), width = 5, height = 3.5, units = 'in', res = 400)
-plot(p)
-dev.off()
-
-# ============================================================================== -
-# 6) heading date ----
-# ============================================================================== -
-
-# see Z:/Public/Jonas/004_ESWW007/RScripts/heading.R
-hd <- read_csv("Z:/Public/Jonas/Data/ESWW007/RefData/BBCH/hd.csv") %>% 
-  mutate(hd_das = yday(hd))
-mdat <- readRDS(paste0(data_path, "mdat.rds"))
-
-pd <- left_join(mdat, hd, by = "plot_UID") %>% 
-  dplyr::filter(diff_area_norm_gdd_peri_y > -0.2) %>% 
-  dplyr::filter(!is.na(hd_das))
-
-fit <- lprq(pd$hd_das, pd$diff_area_norm_gdd_peri_y, m = nrow(new_preds), h = 25, tau = .5)
-rq_yy <- predict(rqmodel, newdata = new_preds)
-
-fits_lin <- rq(diff_area_norm_gdd_peri_y ~ hd_das, data = pd)
-
-new_preds_hd <- pd %>% ungroup() %>% 
-  do(., data.frame(
-    hd_das = seq(round(min(as.numeric(.$hd_das))), max(as.numeric(.$hd_das)), by = 0.5),
-    stringsAsFactors = FALSE)
-  )
-preds <- broom::augment(fits_lin, new_data = new_preds_hd)
-
-p <- base_plot_batches +
-  geom_point(data = pd, aes(x = hd_das, y = diff_area_norm_gdd_peri_y), alpha = 0.025) +
-  # add QR loess fit
-  geom_line(aes(x = fit$xx, y = fit$fv), color = "green", size = 1) +
-  # add OLS fit
-  geom_smooth(method = "lm", data = pd, aes(x = hd_das, y = diff_area_norm_gdd_peri_y)) +
-  # add QR linear fit
-  geom_line(data = preds, aes(x = hd_das, y = .fitted), size = 1, lty = 2, col = "red") +
-  ggpubr::stat_cor(data = pd, aes(x = hd_das, y = diff_area_norm_gdd_peri_y, label = after_stat(rr.label)), color = "blue", geom = "label") +
-  scale_y_continuous(
-    name = bquote("Normalized growth: " ~ A[t[x]] - A[t[x-1]]),
-    limits = c(-0.01, 0.025),
-  ) +
-  geom_smooth(method = "lm") +
-  xlab("Host cultivar heading time (Days after sowing)")
-
-png(paste0(figure_path, "07_lesion_growth_hd.png"), width = 5, height = 3.5, units = 'in', res = 400)
-plot(p)
-dev.off()
-
-# ============================================================================== -
-# 7) Fit models (area) ---- 
-# ============================================================================== -
-
-mdat0 <- readRDS(paste0(data_path, "mdat.rds"))
-
-# df for predictions
-new_preds <- mdat0 %>% ungroup() %>% 
-  do(., data.frame(
-    area = seq(round(min(as.numeric(.$area))), max(as.numeric(.$area)), by = 1),
-    stringsAsFactors = FALSE)
-  )
-
-pdat <- mdat0 %>% 
-  dplyr::select(plot_UID, leaf_nr, lesion_nr, 
-                area, diff_area_norm_gdd, 
-                diff_area_norm_gdd_peri_x,
-                diff_area_norm_gdd_peri_y,
-                diff_area_norm_gdd_peri_xy)
-
-# df for predictions
-new_preds <- mdat %>% ungroup() %>% 
-  do(., data.frame(
-    area = seq(round(min(as.numeric(.$area))), max(as.numeric(.$area)), by = 1),
-    stringsAsFactors = FALSE)
-  )
-
-# linear quantile regression
-rqmodel <- rq(diff_area_norm_gdd_peri_xy ~ area, tau = .5, data = mdat)
-
-# loess
-fit <- lprq(mdat$area, mdat$diff_area_norm_gdd_peri_xy, m = nrow(new_preds), h = 20, tau = .5)
-rq_yy <- predict(rqmodel, newdata = new_preds)
-
-fits <- mdat %>% nest() %>% 
-  mutate(linear_q = purrr::map(.x = data, .f = linear_quantile, x = "area", y = "diff_area_norm_gdd_peri_xy")) %>% 
-  tidyr::pivot_longer(cols = linear_q:linear_q, names_to = "type", values_to = "fit")
-
-d <- fits %>% 
-  mutate(preds = purrr::map(fit, broom::augment, newdata = new_preds))
-preds <- d %>% dplyr::select(type, preds) %>% unnest(preds)
-
-p <- base_plot_batches+
-  geom_point(data = pdat, aes(x = area, y = diff_area_norm_gdd_peri_xy), alpha = 0.1) +
-  geom_smooth(data = pdat, aes(x = area, y = diff_area_norm_gdd_peri_xy), se = F) +
-  geom_smooth(method = "lm", data = pdat,  aes(x = area, y = diff_area_norm_gdd_peri_xy), se = F, color = "red") +
-  # add loess fit
-  geom_line(aes(x = fit$xx, y = fit$fv), color = "green") +
-  # add linear fit
-  geom_line(data = preds, aes(x = area, y = .fitted, color = type)) +
-  ggpubr::stat_cor(data = pdat, aes(x = area, y = diff_area_norm_gdd_peri_xy, label = after_stat(rr.label)), color = "red", geom = "label") +
-  xlab("Lesion area") +   
-  scale_y_continuous(name = bquote("GDD-normalized growth: " ~ A[t[x]] - A[t[x-1]])) +
-  scale_x_continuous(limits = c(0, 150), 
-                     name = bquote("Lesion area (mm" ^2~")"))
-
-png(paste0(figure_path, "lesion_growth_area_fits.png"), width = 7, height = 5, units = 'in', res = 400)
-plot(p)
-dev.off()
-
-# linear seems OK. 
-
-# ============================================================================== -
-# Trying random regression ----
-# ============================================================================== -
-
-mdat <- readRDS(paste0(data_path, "mdat.rds"))
-
-data <- mdat %>% 
-  extract_covars_from_nested(., from="design", "genotype_name")
-
-ggplot(data) +
-  geom_histogram(aes(x = diff_area_pp_y_norm_chr))
-
-# # plots
-# ggplot(data) +
-#   geom_boxplot(aes(x = plot_UID, y = diff_area_pp_y_norm_chr))
+# # ============================================================================== -
+# # 14) heading date ----
+# # ============================================================================== -
 # 
-# # leaves
-# ggplot(data) +
-#   geom_boxplot(aes(x = leaf_UID, y = diff_area_pp_y_norm_chr))
+# # see Z:/Public/Jonas/004_ESWW007/RScripts/heading.R
+# hd <- read_csv("Z:/Public/Jonas/Data/ESWW007/RefData/BBCH/hd.csv") %>% 
+#   mutate(hd_das = yday(hd))
+# mdat <- readRDS(paste0(data_path, "mdat.rds"))
 # 
-# # cultivars
-# ggplot(data) +
-#   geom_boxplot(aes(x = genotype_name, y = diff_area_pp_y_norm_chr))
-
-moddat <- data %>% 
-  dplyr::select(exp_UID, batch, genotype_name, plot_UID, leaf_UID, lesion_UID, diff_area_pp_y_norm_chr, mean_interval_temp, mean_interval_rh, lesion_age) %>% 
-  mutate(batch_UID = paste(exp_UID, batch, sep = "_")) %>% 
-  dplyr::relocate(batch_UID, .after = exp_UID) %>% 
-  dplyr::select(-batch) %>% 
-  mutate_at(C(1:6), factor)
-
-ggplot(moddat) +
-  geom_boxplot(aes(x = batch_UID, y = diff_area_pp_y_norm_chr))
-
-ggplot(moddat, aes(x = mean_interval_temp, y = diff_area_pp_y_norm_chr)) +
-  geom_point() +
-  geom_smooth(method = "lm") +
-  facet_wrap(genotype_name~batch_UID)
-
-library(asreml)
-asreml.options(workspace="8192mb")
-
-ll <- asreml.options()
-ll$workspace
-
-model <- asreml(fixed = diff_area_pp_y_norm_chr~mean_interval_temp + genotype_name + mean_interval_temp:genotype_name + exp_UID + batch_UID + lesion_age,
-                random = ~ plot_UID/leaf_UID, 
-                data = moddat, maxit=20)
-plot(model)
-wald.asreml(model)
-
-model_linear <- lme(
-  diff_area_pp_y_norm_chr ~ genotype_name*mean_interval_rh*mean_interval_temp + batch + lesion_age_gdd, 
-  data = data, 
-  random = ~ 1 | plot_UID / leaf_nr / lesion_nr
-)
-
-res <- residuals(model_linear)
-shapiro.test(res[seq(1, length(res), 10)])
-
-summary(model_linear)
-anova(model_linear)
-plot(model_linear)
-
-hist(residuals(model_linear), breaks = 30, main = "Histogram of Residuals")
-qqnorm(residuals(model_linear))  # Q-Q plot
-qqline(residuals(model_linear), col = "red")
-plot(data$genotype_name, residuals(model_linear), main = "Residuals vs. Genotype")
-plot(data$mean_interval_temp, residuals(model_linear), main = "Residuals vs. Temperature")
-plot(data$lesion_age_gdd, residuals(model_linear), main = "Residuals vs. Lesion Age")
-
-# transformation
-# ensure all values are > 0
-data$response <- data$diff_area_pp_y_norm_chr + abs(min(data$diff_area_pp_y_norm_chr)) + 0.0001
-min(data$response)
-
-model_linear <- lme(
-  log(response) ~ genotype_name*mean_interval_rh*mean_interval_temp + batch + lesion_age_gdd, 
-  data = data, 
-  random = ~ 1 | plot_UID / leaf_nr / lesion_nr
-)
-
-hist(residuals(model_linear), breaks = 30, main = "Histogram of Residuals")
-qqnorm(residuals(model_linear))  # Q-Q plot
-qqline(residuals(model_linear), col = "red")
-
-
-
-plot(model)
-summary(model)$varcomp
-summary(model, coef=TRUE)$coef.fixed
-summary(model, coef=TRUE)$coef.random
-wald.asreml(model)
-
-anova(model)
-
-
-# as in Adhikari et al.
-model_linear <- lme(
-  diff_area_pp_y_norm_chr ~ genotype_name*mean_interval_rh*mean_interval_temp + batch, 
-  # diff_area_pp_y_norm_chr ~ genotype_name*mean_interval_rh*mean_interval_temp + lesion_age_gdd + batch + area, 
-  data = data, 
-  random = ~ 1 | plot_UID / leaf_nr / lesion_nr
-)
-
-VarCorr(model_linear)
-
-plot(fitted(model_linear), residuals(model_linear),
-     xlab = "Fitted Values", ylab = "Residuals", 
-     main = "Residuals vs. Fitted Values")
-abline(h = 0, col = "red")
-
-qqnorm(residuals(model_linear))  # Q-Q plot
-qqline(residuals(model_linear), col = "red")
-
-shapiro.test(residuals(model_linear))
-
-hist(residuals(model_linear), breaks = 30, main = "Histogram of Residuals")
-
-plot(data$genotype_name, residuals(model_linear), main = "Residuals vs. Genotype")
-plot(data$mean_interval_temp, residuals(model_linear), main = "Residuals vs. Temperature")
-plot(data$lesion_age_gdd, residuals(model_linear), main = "Residuals vs. Lesion Age")
-
-summary(model_linear)
-anova(model_linear)
-summary(model_linear)$tTable
-ranef(model_linear)
-
-emmeans(model_linear, ~ lesion_age_gdd | genotype_name)
-plot(emmeans(model_linear, ~ genotype_name))
-
-# install.packages("performance")  # If not installed
-library(performance)
-
-# Compute R? for mixed model
-r2_results <- r2_nakagawa(model_linear)
-print(r2_results)
-
-
-
-
-model <- lmer(
-  diff_area_ppy ~ genotype_name*lesion_age_gdd + area + 
-    (1 | batch) + (1 | plot_UID / leaf_nr / lesion_nr),
-  data = data
-)
-
-model <- nlmer(
-  diff_area_pp_y ~ SSasymp(lesion_age_gdd, yf, alpha, y0) + 
-    genotype_name + diff_gdd + area ~ 1 + (1 | batch) + (1 | plot_UID / leaf_nr / lesion_nr),
-  data = data,
-  start = list(yf = 0.0, alpha = 0.1, y0 = 1) 
-)
-
-
-summary(model)
-
-summary(model)
-ranef(model)
-
-model_reduced <- lmer(
-  diff_area_pp_y ~ diff_gdd + lesion_age_gdd + area +
-    (1 | batch) + (1 | plot_UID / leaf_nr / lesion_nr),
-  data = data,
-  control = lmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 1e5))
-)
-
-anova(model_reduced, model)
+# pd <- left_join(mdat, hd, by = "plot_UID") %>% 
+#   dplyr::filter(diff_area_norm_gdd_peri_y > -0.2) %>% 
+#   dplyr::filter(!is.na(hd_das))
+# 
+# fit <- lprq(pd$hd_das, pd$diff_area_norm_gdd_peri_y, m = nrow(new_preds), h = 25, tau = .5)
+# rq_yy <- predict(rqmodel, newdata = new_preds)
+# 
+# fits_lin <- rq(diff_area_norm_gdd_peri_y ~ hd_das, data = pd)
+# 
+# new_preds_hd <- pd %>% ungroup() %>% 
+#   do(., data.frame(
+#     hd_das = seq(round(min(as.numeric(.$hd_das))), max(as.numeric(.$hd_das)), by = 0.5),
+#     stringsAsFactors = FALSE)
+#   )
+# preds <- broom::augment(fits_lin, new_data = new_preds_hd)
+# 
+# p <- base_plot_batches +
+#   geom_point(data = pd, aes(x = hd_das, y = diff_area_norm_gdd_peri_y), alpha = 0.025) +
+#   # add QR loess fit
+#   geom_line(aes(x = fit$xx, y = fit$fv), color = "green", size = 1) +
+#   # add OLS fit
+#   geom_smooth(method = "lm", data = pd, aes(x = hd_das, y = diff_area_norm_gdd_peri_y)) +
+#   # add QR linear fit
+#   geom_line(data = preds, aes(x = hd_das, y = .fitted), size = 1, lty = 2, col = "red") +
+#   ggpubr::stat_cor(data = pd, aes(x = hd_das, y = diff_area_norm_gdd_peri_y, label = after_stat(rr.label)), color = "blue", geom = "label") +
+#   scale_y_continuous(
+#     name = bquote("Normalized growth: " ~ A[t[x]] - A[t[x-1]]),
+#     limits = c(-0.01, 0.025),
+#   ) +
+#   geom_smooth(method = "lm") +
+#   xlab("Host cultivar heading time (Days after sowing)")
+# 
+# png(paste0(figure_path, "07_lesion_growth_hd.png"), width = 5, height = 3.5, units = 'in', res = 400)
+# plot(p)
+# dev.off()
 
 # ============================================================================== -
-
-# get cleaned data (without intervals)
-base_plot <- ggplot() +
-  xlab("Lesion age (?C days)") +
-  scale_color_manual(values =  col) +
-  guides(colour = guide_legend(override.aes = list(alpha = 1))) +
-  theme(panel.background = element_blank(),
-        panel.grid.minor.y = element_blank(),
-        panel.grid.minor.x = element_blank(),
-        panel.grid.major = element_blank(),
-        axis.line = element_line(),
-        legend.title = element_blank())
-
-data <- readRDS(paste0(data_path, "mdat.rds")) %>% 
-  extract_covars_from_nested(., from="design", "genotype_name")
-
-# cross batches for common genotypes
-subset <- data %>% 
-  filter(genotype_name %in% c("FORNO", "BORNEO"))
-col = pal_jco()(2)
-base_plot +
-  geom_point(data = subset, aes(x = lesion_age_gdd, y = diff_area_norm_gdd_peri_y, color = as.factor(batch)),
-             alpha = 0.1) +
-  geom_smooth(data = subset, method = "lm", aes(x = lesion_age_gdd, y = diff_area_norm_gdd_peri_y, color = as.factor(batch)), se = F) + 
-  geom_smooth(data = subset, aes(x = lesion_age_gdd, y = diff_area_norm_gdd_peri_y, color = as.factor(batch)), se = F)
-
-# as in Adhikari et al.
-model_linear <- lme(
-  diff_area_ppy ~ genotype_name*diff_gdd*lesion_age_gdd + batch + area, 
-  data = data, 
-  random = ~ 1 | plot_UID / leaf_UID / lesion_UID
-)
-
-summary(model_linear)
-anova(model_linear)
-summary(model_linear)$tTable
-ranef(model_linear)
-
-emmeans(model_linear, ~ lesion_age_gdd | genotype_name)
-plot(emmeans(model_linear, ~ genotype_name))
-
-# ============================================================================== -
-# data for statslab ----
+# data export ----
 # ============================================================================== -
 
 # Function to get range for numeric columns

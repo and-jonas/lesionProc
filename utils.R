@@ -1,21 +1,33 @@
 
-library(tidyverse)
-library(data.table)
-library(lubridate)
-library(caret)
-library(ggsci)
-library(ggpubr)
-library(readxl)
-library(nls.multstart)
-library(quantreg)
-library(progress)
+#=============================================================================== -
 
-# Function to extract temperature course for specific site and time interval
+#HEADER ----
+
+# Author: Jonas Anderegg, ETH Zürich
+# Copyright (C) 2025  ETH Zürich, Jonas Anderegg (jonas.anderegg@usys.ethz.ch)
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#  
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <http://www.gnu.org/licenses/>.
+
+#=============================================================================== -
+
+# extracts temperature course for specific site and time interval
 extract_covar <- function(df, from, to) {
   df_ <- df %>% filter(timestamp > from, timestamp <= to)
   return(df_)
 }
 
+# extracts variables from list columns
 extract_covars_from_nested <- function(tbl, from, vars)
 {
   dat_vars <- list()
@@ -87,6 +99,7 @@ compute_pseudoR2 <- function(data, response, qr_model){
   return(list(pseudo_r2, p))
 }
 
+# get the pseudo R2 metric for non-linear models using standard error estimates from bootstrapping
 compute_pseudoR2_nl <- function(obj, response){
   resid_fit <- residuals(obj)
   rho_tau <- function(u, tau) {
@@ -125,7 +138,7 @@ compute_deviance <- function(fit, data, tau = 0.5) {
 }
 
 
-# quantile regression 
+# non-linear quantile regression with grid of starting values
 nls_quantile_exp <- function(data, x, y, tau = 0.5, n_samples = 300) {
   # get starting values
   start_samples <- data.frame(
