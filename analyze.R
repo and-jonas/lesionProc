@@ -1,7 +1,7 @@
 
 #=============================================================================== -
 
-#HEADER ----
+# HEADER ----
 
 # Author: Jonas Anderegg, ETH Zürich
 # Copyright (C) 2025  ETH Zürich, Jonas Anderegg (jonas.anderegg@usys.ethz.ch)
@@ -19,13 +19,15 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-#=============================================================================== -
+# ============================================================================== -
+# 1) Prepare work space ----
+# ============================================================================== -
 
 rm(list = ls())
 Sys.getenv("R_LIBS")
 .libPaths("T:/R4Userlibs")
 
-list.of.packages <- c("tidyverse", "gridExtra", "ggpubr", "quantreg")
+list.of.packages <- c("tidyverse", "gridExtra", "ggpubr", "quantreg", "car")
 
 new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages, dependencies = TRUE, repos = 'https://stat.ethz.ch/CRAN/')
@@ -34,21 +36,29 @@ library(tidyverse)
 library(gridExtra)
 library(ggpubr)
 library(quantreg)
+library(car)
 
-source("C:/Users/anjonas/RProjects/lesionProc/utils.R")
+# set the working directory
+setwd("C:/Users/anjonas/RProjects/lesionProc")
 
-# ============================================================================== -
-# 0) Prepare ----
-# ============================================================================== -
+# load custom functions
+source("utils.R")
 
-# paths
-in_path <- "Z:/Public/Jonas/011_STB_leaf_tracking/output/"
-data_path <- "Z:/Public/Jonas/011_STB_leaf_tracking/data/"
-figure_path <- "Z:/Public/Jonas/011_STB_leaf_tracking/Figures/4/"
+# set paths
+data_path <- "./data/"
+meta_path <- "./data/meta/"
+out_path <- "./output/"
+figure_path <- "./output/figures/"
+out_data_path <- "./output/data/"
+
+# create output directories
+for (p in c(out_path, figure_path, out_data_path)){
+  if(!dir.exists(p))
+    dir.create(p)
+}
 
 # base plot
 colors = c("#E1BE6A", "#40B0A6")
-
 base_plot_batches <- ggplot() +
   scale_color_manual(values =  colors, 
                      breaks = c("1", "2"),
@@ -63,61 +73,28 @@ base_plot_batches <- ggplot() +
         legend.title = element_blank(),
         legend.position.inside = c(0.8, 0.1))
 
+# labels
 exp_labels <- c(
   "ESWW007" = "2023",
   "ESWW009" = "2024"
 )
 
 # ============================================================================== -
-# 1) Get data ----
+# 2) Get data ----
 # ============================================================================== -
 
-# get data sets
-lesion_data_esww007 <- readRDS(paste0(in_path, "dataset_ESWW007/data_lesions_aug.rds"))
-lesion_data_esww009 <- readRDS(paste0(in_path, "dataset_ESWW009/data_lesions_aug.rds"))
-leaf_data_esww007 <- readRDS(paste0(in_path, "dataset_ESWW007/data_leaf_aug.rds"))
-leaf_data_esww009 <- readRDS(paste0(in_path, "dataset_ESWW009/data_leaf_aug.rds"))
-lesion_data <- bind_rows(lesion_data_esww007, lesion_data_esww009)
-leaf_data <- bind_rows(leaf_data_esww007, leaf_data_esww009)
+# read data from csv file
+data <- read_csv(paste0(data_path, "lesion_dataset.csv"))
 
-# get meta information
-# get information on which leaves in which time span to analyze
-meta_esww007 <- read.csv("Z:/Public/Jonas/Data/ESWW007/SingleLeaf/Meta/stb_dominant.csv")
-meta_esww009 <- read.csv("Z:/Public/Jonas/Data/ESWW009/SingleLeaf/Meta/stb_dominant_ESWW009.csv")
-meta <- bind_rows(meta_esww007, meta_esww009) %>% 
-  mutate(date = strsplit(last_image_id, "_") %>% 
-           lapply(., "[[", 1) %>% unlist(),
-         time = strsplit(last_image_id, "_") %>% 
-           lapply(., "[[", 2) %>% unlist(),
-         last_valid_timestamp = ymd_hms(paste(date, time, sep = " "))) %>% 
-  dplyr::select(leaf_UID, last_valid_timestamp)
+# group design-related variables into a list column
+subset <- data %>% 
+  nest(design = c(exp_UID:inoculation_treatment)) %>% 
+  relocate(design, .after = plot_UID)
 
-# get leaf-level features that are of interest at lesion-level as well
-names(leaf_data)
-leaf_level_features <- leaf_data %>% 
-  dplyr::select(plot_UID, timestamp, leaf_UID, la_healthy_f, placl, rust_density)
-
-# ============================================================================== -
-# 2) Filter on Leaves ----
-# ============================================================================== -
-
-# select relevant leaves within relevant time span
-files <- leaf_data %>% 
-  full_join(., meta) %>% 
-  dplyr::filter(leaf_UID %in% meta$leaf_UID) %>% 
-  dplyr::filter(timestamp <= last_valid_timestamp) %>% 
-  # select leaves with at least 90% of the roi present 
-  group_by(leaf_UID) %>% 
-  mutate(la_tot_init = dplyr::nth(n=2, la_tot)) %>%
-  dplyr::filter(la_tot >= 0.90*la_tot_init) %>%
-  pull(file_id)
-subset <- lesion_data %>% 
-  dplyr::filter(file_id %in% files) %>% 
+# extract required variables from design
+subset <- subset %>% 
   extract_covars_from_nested(., from = "design", var = c("genotype_name", "exp_UID")) %>% 
-  relocate(exp_UID, genotype_name, .after = design)
-
-# add leaf-level data
-subset <- left_join(subset, leaf_level_features)
+    relocate(exp_UID, genotype_name, .after = design)
 
 # plot all selected data
 p <- list()
@@ -148,17 +125,8 @@ dev.off()
 # 3) Add leaf-level features and environmental data ----
 # ============================================================================== -
 
-# add heading date
-# see Z:/Public/Jonas/004_ESWW007/RScripts/heading.R
-hd_esww007 <- read_csv("Z:/Public/Jonas/Data/ESWW007/RefData/BBCH/hd.csv")
-hd_esww009 <- read_csv("Z:/Public/Jonas/Data/ESWW009/RefData/BBCH/hd.csv")
-hd <- bind_rows(hd_esww007, hd_esww009)%>% 
-  dplyr::select(plot_UID, hd)
-# estimated heading dates based on previous scorings and images from 06-01 and 06-05
-hd[hd$plot_UID == "ESWW0070063",]$hd <- as.Date("2023-06-03")
-hd[hd$plot_UID == "ESWW0070183",]$hd <- as.Date("2023-06-03")
-hd[hd$plot_UID == "ESWW0090024",]$hd <- as.Date("2024-06-08")
-hd[hd$plot_UID == "ESWW0090109",]$hd <- as.Date("2023-06-10")
+# get heading dates and add to dataset
+hd <- read_csv(paste0(meta_path, "heading_date.csv"))
 subset <- subset %>% 
   left_join(., hd, by = "plot_UID")
 
@@ -202,25 +170,25 @@ subset <- subset %>%
 
 # Convert chronological time to thermal time
 # get environmental data
-df_covar <- read_csv("Z:/Public/Jonas/Data/ESWW009/MeteoData/covar_data_position_id_/means.csv") %>% 
+df_covar <- read_csv(paste0(meta_path, "weather_covariates.csv")) %>% 
   dplyr::rename("temp" = "mean_tmp",
                 "rh" = "mean_rh") %>% 
   # pre-filter the data set to speed up calculations
   dplyr::filter(timestamp > as.Date("2023-05-25") & timestamp < as.Date("2023-07-01") | 
                   timestamp > as.Date("2024-05-25") & timestamp < as.Date("2024-07-01"))
 
-## Add covar courses
+## Add covariate courses
 # Generate covar course lookup table
 df_covar_lookup <- subset %>% ungroup() %>% 
   dplyr::select(timestamp, first_timestamp_lesion) %>%
   unique() %>% 
   mutate(covar_course_id = seq(n()))
 
-# Merge lookup id to measurements
+# Merge look-up id to measurements
 subset <- left_join(
   subset, df_covar_lookup, by = c("timestamp", "first_timestamp_lesion"))
 
-# Extract temperature data per lookup id
+# Extract temperature data per look-up id
 df_covar_lookup <- df_covar_lookup %>%
   group_by(covar_course_id) %>%
   nest() %>%
@@ -240,11 +208,13 @@ df <- subset %>% ungroup() %>%
   ) %>% 
   relocate(covar_course_id, covar_course, .after = batch)
 
-saveRDS(df, paste0(data_path, "subset_step0.rds"))
+# save intermediate results
+saveRDS(df, paste0(out_data_path, "subset_step0.rds"))
 
 # ============================================================================== -
 
-df <- readRDS(paste0(data_path, "subset_step0.rds"))
+# load intermediate results
+df <- readRDS(paste0(out_data_path, "subset_step0.rds"))
 
 # Chronological time vs. Thermal time
 p <- base_plot_batches + 
@@ -357,8 +327,6 @@ rm_lesions_5 <- subset %>%
 subset <- subset %>% 
   filter(!(lesion_UID %in% rm_lesions_5))
 
-saveRDS(subset, paste0(data_path, "subset_step0_for_epiparams.rds"))
-
 # exclude observations of highly "trapped" lesions
 # and observations of lesions without an area (e.g., partially outside of roi)
 sub <- subset %>% 
@@ -369,29 +337,32 @@ sub <- subset %>%
   dplyr::select(-lag_analyzable_perimeter) %>%  # to avoid conflicts further down
   filter(!is.na(area))
 
-saveRDS(sub, paste0(data_path, "subset_step_0_filtered.rds"))
+# save intermediate results
+saveRDS(sub, paste0(out_data_path, "subset_step_0_filtered.rds"))
 
 # ============================================================================== -
 # 5) Convert to intervals ----
 # ============================================================================== -
 
-sub <- readRDS(paste0(data_path, "subset_step_0_filtered.rds"))
+# load intermediate results
+sub <- readRDS(paste0(out_data_path, "subset_step_0_filtered.rds"))
 
 # Get lag variables and interval differences
+# this may take a while
 s <- sub %>% ungroup() %>%
   dplyr::select(-genotype_name) %>%  # conflicting with lag extraction
   group_by(plot_UID, leaf_nr, lesion_nr) %>% nest() %>%
   ungroup() %>%
   mutate(data = purrr::map(data, get_lags_diffs, vars = c(18:65))) %>%
   unnest(c(data))
-saveRDS(s, paste0(data_path, "subset_step_0_filtered_withlags.rds"))
+saveRDS(s, paste0(out_data_path, "subset_step_0_filtered_withlags.rds"))
 
 # ============================================================================== -
 # 6) Filter interval data ----
 # ============================================================================== -
 
 # get normalized growth
-data <- readRDS(paste0(data_path, "subset_step_0_filtered_withlags.rds"))
+data <- readRDS(paste0(out_data_path, "subset_step_0_filtered_withlags.rds"))
 data <- data %>% 
   # remove intervals without lag timepoint
   dplyr::filter(!is.na(lag_timestamp)) %>% 
@@ -407,8 +378,7 @@ data <- data %>%
          diff_area_pp_xy_norm_chr = diff_area_pp_xy/as.numeric(diff_time),
          diff_area_pp_xy_norm_gdd = diff_area_pp_xy/diff_gdd)
 
-
-# plot cumulative distribution of percentiles for UN-filtered data
+# plot cumulative distribution of percentiles for un-filtered data
 x_sorted <- sort(data$diff_area_norm_chr)
 percentiles <- ecdf(x_sorted)(x_sorted) * 100
 df <- data.frame(value = x_sorted, percentile = percentiles)
@@ -451,11 +421,12 @@ interval_stats <- data %>% ungroup() %>%
 # a problem with one lesion (ESWW0020_9_9); remove
 data <- data %>% dplyr::filter(lesion_UID != "ESWW0070020_9_9")
 
-saveRDS(data, paste0(data_path, "subset_step2.rds"))
+# save intermediate results
+saveRDS(data, paste0(out_data_path, "subset_step2.rds"))
 # data ready for feature selection
 
 # data set size
-data <- readRDS( paste0(data_path, "subset_step2.rds"))
+data <- readRDS( paste0(out_data_path, "subset_step2.rds"))
 data <- data %>% extract_covars_from_nested("design", "genotype_name")
 n_lesions <- data %>% group_by(lesion_UID) %>% nest()
 n_intervals_lesion <- n_lesions %>% ungroup() %>% 
@@ -571,13 +542,14 @@ P <- ggplot() + geom_line(data = sample_dat,
         panel.grid = element_blank(),
         axis.ticks = element_blank(),
         axis.text = element_blank())
-png(paste0(figure_path, "EXAMPLE.png"), width = 3.5, height = 3.5, units = 'in', res = 400)
+png(paste0(figure_path, "example.png"), width = 3.5, height = 3.5, units = 'in', res = 400)
 plot(P)
 dev.off()
 
 # ============================================================================== -
 
-subset <- readRDS(paste0(data_path, "subset_step2.rds"))
+# load intermediate data
+subset <- readRDS(paste0(out_data_path, "subset_step2.rds"))
 
 # Sort and compute percentiles
 x_sorted <- sort(subset$diff_area_norm_chr)
@@ -675,10 +647,10 @@ qr_models3 <- qr_models2 %>%
 qr_models4 <- qr_models3 %>%
   mutate(r2 = map_dbl(pseudo_r2, 1))
 # save
-saveRDS(qr_models4, paste0(data_path, "fits_perimeters.rds"))
+saveRDS(qr_models4, paste0(out_data_path, "fits_perimeters.rds"))
 
 # load
-qr_models4 <- readRDS(paste0(data_path, "fits_perimeters.rds"))
+qr_models4 <- readRDS(paste0(out_data_path, "fits_perimeters.rds"))
 
 # extract predictions
 predictions <- qr_models4 %>% 
@@ -723,7 +695,7 @@ dev.off()
 # 8) Growth ~ Init Area ----
 # ============================================================================== -
 
-subset <- readRDS(paste0(data_path, "subset_step2.rds"))
+subset <- readRDS(paste0(out_data_path, "subset_step2.rds"))
 
 # subsample initial detections
 init <- subset %>% dplyr::filter(lag_lesion_age == 0)
@@ -832,7 +804,6 @@ model <- lm(mean_delta ~ area + mean_age + batch + genotype_name, data = both)
 summary(model)
 anova(model)
 
-library(car)
 Anova(model)
 Anova(model, type = "III")
 
@@ -841,7 +812,7 @@ Anova(model, type = "III")
 # ============================================================================== -
 
 # SHOW FOR ALL DIMENSIONS
-mdat0 <- readRDS(paste0(data_path, "subset_step2.rds"))
+mdat0 <- readRDS(paste0(out_data_path, "subset_step2.rds"))
 
 # reshape data for plotting
 pdat <- mdat0 %>% 
@@ -949,7 +920,8 @@ dev.off()
 # 10) Area ~ Age ----
 # ============================================================================== -
 
-data <- readRDS(paste0(data_path, "subset_step2.rds"))
+# load intermediate results
+data <- readRDS(paste0(out_data_path, "subset_step2.rds"))
 
 # can fit loess only if sufficient data is available
 # must limit the range of the predictor variable slightly 
@@ -1023,7 +995,8 @@ ggplot(mdat)+
 # 11) Growth ~ Age ----
 # ============================================================================== -
 
-mdat <- readRDS(paste0(data_path, "subset_step2.rds"))
+# load intermediate results
+mdat <- readRDS(paste0(out_data_path, "subset_step2.rds"))
 
 # check distribution
 # very sparse data at large area
@@ -1066,10 +1039,10 @@ fits <- mdat %>% nest() %>%
   mutate(linear_q = purrr::map(.x = data, .f = linear_quantile, x=x, y=y),
          nls_q_exp = purrr::map(.x = data, .f = nls_quantile_exp, n_samples = 300, x=x, y=y)) %>%
   tidyr::pivot_longer(cols = linear_q:nls_q_exp, names_to = "type", values_to = "fit")
-saveRDS(fits, paste0(data_path, "model_fits.rds"))
+saveRDS(fits, paste0(out_data_path, "nls_model_fits.rds"))
 
 # re-load and evaluate models
-fits <- readRDS(paste0(data_path, "model_fits.rds"))
+fits <- readRDS(paste0(out_data_path, "nls_model_fits.rds"))
 
 # get pseudo-r2
 pseudo_R2 <- compute_pseudoR2_nl(obj = fits$fit[[2]], response = y)
@@ -1109,7 +1082,7 @@ dev.off()
 # ============================================================================== -
 
 # get environmental data
-mdat <- readRDS(paste0(data_path, "subset_step2.rds")) %>% 
+mdat <- readRDS(paste0(out_data_path, "subset_step2.rds")) %>% 
   extract_covars_from_nested("design", "genotype_name") %>% 
   mutate(batch_UID = paste(exp_UID, batch, sep = "_")) %>% 
   dplyr::rename(diff = "diff_area_pp_y_norm_chr")

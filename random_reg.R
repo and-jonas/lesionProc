@@ -225,4 +225,47 @@ plt4 <-ggplot(data=var_comp_names %>% filter(!residual_term), aes(x=reorder(varc
 
 ggarrange(plt1, ggarrange(plt2, plt3, plt4, nrow=1), nrow=2)
 
+# ============================================================================== -
 
+# Get predicted slopes
+
+# Temperature
+df_temp_resp_G <- predict(m3_rh_temp, classify = "genotype_name:mean_temp",
+                          levels= list(
+                            mean_temp = c(0, 1)
+                          )
+)$pvals
+df_temp_resp_G <- df_temp_resp_G %>% select(-std.error) %>% pivot_wider(names_from = mean_temp, values_from = predicted.value) %>%
+  mutate(slope = `1` - `0`) %>% 
+  rename(slope_temp = slope) %>% 
+  dplyr::select(genotype_name, slope_temp)
+
+# Relative Humidity
+df_rh_resp_G <- predict(m3_rh_temp, classify = "genotype_name:mean_rh",
+                          levels= list(
+                            mean_rh = c(0, 1)
+                          )
+)$pvals
+df_rh_resp_G <- df_rh_resp_G %>% select(-std.error) %>% pivot_wider(names_from = mean_rh, values_from = predicted.value) %>%
+  mutate(slope = `1` - `0`) %>% 
+  rename(slope_rh = slope) %>% 
+  dplyr::select(genotype_name, slope_rh)
+
+
+# Age
+df_age_resp_G <- predict(m3_rh_temp, classify = "genotype_name:age",
+                        levels= list(
+                          age = c(0, 1)
+                        )
+)$pvals
+df_age_resp_G <- df_age_resp_G %>% select(-std.error) %>% pivot_wider(names_from = age, values_from = predicted.value) %>%
+  mutate(slope = `1` - `0`) %>% 
+  rename(slope_age = slope) %>% 
+  dplyr::select(genotype_name, slope_age)
+
+slopes <- full_join(df_temp_resp_G, df_rh_resp_G) %>% 
+  full_join(., df_age_resp_G)
+write.csv(slopes, "Z:/Public/Jonas/011_STB_leaf_tracking/data/slopes_blups.csv",
+          row.names = F)
+
+# ============================================================================== -

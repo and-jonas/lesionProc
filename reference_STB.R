@@ -242,7 +242,101 @@ write.csv(genoblups, "Z:/Public/Jonas/011_STB_leaf_tracking/data/sev_blups.csv")
 
 # ============================================================================== -
 
-# genetic (?) correlation between measures of disease severity and lesion growth rate
+# >> Visual scoring data ----
+
+# get raw plot visual scoring data
+scordat <- read_excel("O:/Evaluation/FIP/2016/WW012/RefTraits/Septoria/2016_FIP_scoringdataFabio.xlsx", 
+                      sheet = 1, skip = 3)
+# get rid of unwanted rows
+scordat <- scordat %>% 
+  dplyr::filter(!plot %in% c("TEM", "lot3")) %>%
+  dplyr::filter(!is.na(plot)) %>% 
+  dplyr::filter(!is.na(nosemis)) %>% 
+  mutate(plot = as.numeric(plot))
+
+# still some non-unique plots
+# duplicate for 787, but 788 is missing
+# one 176 in place of 716
+# I assume these are errors from manually preparing the table and correct them
+scordat[634, ]$plot <- 716
+scordat[706, ]$plot <- 788
+
+# re-format
+scordat <- scordat %>% 
+  dplyr::select(3, 4, 5, 7, 9) %>% 
+  rename("20160520" = 3,
+         "20160621" = 4,
+         "20160629" = 5)
+
+# calculate AUDPC (what is the reference date ? taken from Fabio)
+audpc <- scordat %>% 
+  mutate(AUDPC = `20160520`*4/2+((`20160520`+`20160621`)*(44-4)/2)+((`20160621`+`20160629`)*(52-44)/2)) %>% 
+  dplyr::select(plot, AUDPC)
+
+# add experimental design
+design <- read_xls("O:/Evaluation/FIP/2016/Feldbuch/WW/2015_Design_FPWW012_FPWW016.xls",
+                   sheet = 4, skip = 5) %>% 
+  dplyr::select(Plot_ID, Plot, Lot, RangeLot, RowLot, Gen_Name, Gen_ID, Checks)
+scdat <- left_join(design, audpc, by = c("Plot" = "plot"))
+# 720 rows, OK. 
+
+# make grid gap between lots
+moddat <- scdat %>% 
+  mutate(RangeLot = ifelse(Lot == 3, RangeLot + 18, RangeLot),
+         RowLot = ifelse(Lot == 3, RowLot + 24, RowLot))
+
+# convert to factors
+moddat <- moddat %>% 
+  mutate(RowF = as.factor(RowLot),
+         RangeF = as.factor(RangeLot),
+         Lot = as.factor(Lot),
+         Gen_ID = as.factor(Gen_ID),
+         Check = as.factor(Checks)) %>% 
+  dplyr::select(-Checks) %>% 
+  relocate(AUDPC, .after = Check)
+
+# PARADOR repliace is extreme outlier - remove
+moddat[moddat$Plot_ID == "FPWW0120633", ]$AUDPC <- NA
+
+# examine correlation across lots
+pdat <- moddat %>% dplyr::select(Lot, Gen_Name, AUDPC)
+pdat <- split(pdat, pdat$Lot)
+names(pdat[[1]])[3] <- "AUDPC_3"
+names(pdat[[2]])[3] <- "AUDPC_4"
+pdat <- full_join(pdat[[1]], pdat[[2]], by = "Gen_Name")
+ggplot(pdat) +
+  geom_point(aes(x = AUDPC_3, y = AUDPC_4))
+cor(pdat$AUDPC_3, pdat$AUDPC_4, use = "pairwise.complete.obs")
+# No correlation
+
+# perform spatial correction
+response <- "AUDPC"
+random <- as.formula("~ RowF + RangeF")
+fixed <- as.formula("~ Check")
+genotype = "Gen_Name"
+genotype.as.random <- T  # to get variance estimate
+spats <- SpATS(response = response,
+               random = random, 
+               fixed = fixed,
+               spatial = ~PSANOVA(RowLot, RangeLot, nseg = c(12,12), nest.div=c(2,2)),
+               genotype = genotype, 
+               genotype.as.random = genotype.as.random,
+               data = moddat,
+               control = list(maxit = 100, tolerance = 1e-03, monitoring = 0))
+getHeritability(spats)
+plot(spats,  spaTrend = "percentage")
+
+pred <- predict.SpATS(spats, which = "Gen_Name") %>% 
+  dplyr::select(Gen_Name, predicted.values) %>% as_tibble() %>% 
+  rename("AUDPC" = 2)
+write.csv(pred, "Z:/Public/Jonas/011_STB_leaf_tracking/data/AUDPC_blups.csv",
+          row.names = F)
+
+# ============================================================================== -
+
+# Correlation with overall QR ----
+
+# correlation between measures of disease severity and lesion growth rate
 
 sev_blups <- read_csv("Z:/Public/Jonas/011_STB_leaf_tracking/data/sev_blups.csv") %>% 
   dplyr::select(genotype_name, predicted.value) %>% 
@@ -250,14 +344,21 @@ sev_blups <- read_csv("Z:/Public/Jonas/011_STB_leaf_tracking/data/sev_blups.csv"
 inc_blups <- read_csv("Z:/Public/Jonas/011_STB_leaf_tracking/data/inc_blups.csv") %>% 
   dplyr::select(genotype_name, predicted.value) %>% 
   rename(pred_inc = predicted.value)
+audpc_blups <- read_csv("Z:/Public/Jonas/011_STB_leaf_tracking/data/AUDPC_blups.csv") %>% 
+  rename(genotype_name = Gen_Name)
 growth_blups <- read_csv("Z:/Public/Jonas/011_STB_leaf_tracking/data/growth_blups.csv") %>% 
   dplyr::select(genotype_name, predicted.value) %>% 
   rename(pred_growth = predicted.value)
+slope_blups <- read_csv("Z:/Public/Jonas/011_STB_leaf_tracking/data/slopes_blups.csv") %>% 
+  mutate(across(where(is.numeric), ~ .x * 1e5))
 
 # merge
 pdat <- full_join(sev_blups, inc_blups) %>% 
-  full_join(., growth_blups)
+  full_join(., growth_blups) %>% 
+  left_join(., audpc_blups) %>% 
+  left_join(., slope_blups)
 
+# outlier 
 mod <- lm(pred_growth ~ pred_sev, data = pdat)
 summary(mod)
 d <- cooks.distance(mod)
@@ -296,7 +397,7 @@ data_nooutlier <- plotdata[[2]]
 label1 <- get_lm_label(data_all$pred_sev, data_all$pred_inc)
 label1_2 <- get_lm_label(data_nooutlier$pred_sev, data_nooutlier$pred_inc)
 p1 <- ggplot(data_all, aes(x = pred_sev, y = pred_inc)) +
-  geom_point(aes(color = ifelse(genotype_name == "AUBUSSON", "red", "black")), shape = 1) + # Set color for AUBUSSON
+  geom_point(aes(color = ifelse(genotype_name == "AUBUSSON", "red", "black"))) + # Set color for AUBUSSON
   geom_smooth(method = "lm", se = FALSE, color = "black") +
   geom_smooth(data = data_nooutlier, method = "lm", se = FALSE, lty = 2, color = "slateblue") +
   annotate("text", x = min(data_all$pred_sev, na.rm = T), y = max(data_all$pred_inc, na.rm = T), 
@@ -312,7 +413,7 @@ p1 <- ggplot(data_all, aes(x = pred_sev, y = pred_inc)) +
 label2 <- get_lm_label(data_all$pred_sev, data_all$pred_growth)
 label2_2 <- get_lm_label(data_nooutlier$pred_sev, data_nooutlier$pred_growth)
 p2 <- ggplot(data_all, aes(x = pred_sev, y = pred_growth)) +
-  geom_point(aes(color = ifelse(genotype_name == "AUBUSSON", "red", "black")), shape = 1) + # Set color for AUBUSSON
+  geom_point(aes(color = ifelse(genotype_name == "AUBUSSON", "red", "black"))) + # Set color for AUBUSSON
   geom_smooth(method = "lm", se = FALSE, color = "black") +
   geom_smooth(data = data_nooutlier, method = "lm", se = FALSE, lty = 2, color = "slateblue") +
   annotate("text", x = min(data_all$pred_sev, na.rm = T), y = max(data_all$pred_growth, na.rm = T), 
@@ -330,7 +431,7 @@ p2 <- ggplot(data_all, aes(x = pred_sev, y = pred_growth)) +
 label3 <- get_lm_label(data_all$pred_inc, data_all$pred_growth)
 label3_2 <- get_lm_label(data_nooutlier$pred_inc, data_nooutlier$pred_growth)
 p3 <- ggplot(data_all, aes(x = pred_inc, y = pred_growth)) +
-  geom_point(aes(color = ifelse(genotype_name == "AUBUSSON", "red", "black")), shape = 1) + # Set color for AUBUSSON
+  geom_point(aes(color = ifelse(genotype_name == "AUBUSSON", "red", "black"))) + # Set color for AUBUSSON
   geom_smooth(method = "lm", se = FALSE, color = "black") +
   geom_smooth(data = data_nooutlier, method = "lm", se = FALSE, lty = 2, color = "slateblue") +
   annotate("text", x = min(data_all$pred_inc, na.rm = T), y = max(data_all$pred_growth, na.rm = T), 
@@ -345,9 +446,133 @@ p3 <- ggplot(data_all, aes(x = pred_inc, y = pred_growth)) +
   theme(axis.title.y = element_blank(),
         axis.text.y = element_blank(),
         plot.title = element_text(face = "bold"))
+
+# Plot 4: AUDPC vs predicted.value
+label4 <- get_lm_label(data_all$AUDPC, data_all$pred_growth)
+label4_2 <- get_lm_label(data_nooutlier$AUDPC, data_nooutlier$pred_growth)
+p4 <- ggplot(data_all, aes(x = AUDPC, y = pred_growth)) +
+  geom_point(aes(color = ifelse(genotype_name == "AUBUSSON", "red", "black"))) + # Set color for AUBUSSON
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  geom_smooth(data = data_nooutlier, method = "lm", se = FALSE, lty = 2, color = "slateblue") +
+  annotate("text", x = min(data_all$AUDPC, na.rm = T), y = max(data_all$pred_growth, na.rm = T), 
+           label = label4, hjust = 0, vjust = 0, size = 3) +
+  annotate("text", x = min(data_all$AUDPC, na.rm = T), y = 0.97*max(data_all$pred_growth, na.rm = T), 
+           label = label4_2, hjust = 0, vjust = 0, color = "slateblue", size = 3) +
+  labs(x = "AUDPC", y = "Lesion Growth") + 
+  scale_color_identity() + 
+  scale_y_continuous(limits = c(0.0006, 0.001)) +
+  ggtitle("C") +
+  theme_bw() +
+  theme(axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        plot.title = element_text(face = "bold"))
+
+# Plot 5: AUDPC vs Severity
+label5 <- get_lm_label(data_all$AUDPC, data_all$pred_sev)
+label5_2 <- get_lm_label(data_nooutlier$AUDPC, data_nooutlier$pred_sev)
+p5 <- ggplot(data_all, aes(x = AUDPC, y = pred_sev)) +
+  geom_point(aes(color = ifelse(genotype_name == "AUBUSSON", "red", "black"))) +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  geom_smooth(data = data_nooutlier, method = "lm", se = FALSE, lty = 2, color = "slateblue") +
+  annotate("text", x = min(data_all$AUDPC, na.rm = T), y = max(data_all$pred_sev, na.rm = T), 
+           label = label5, hjust = 0, vjust = 0, size = 3) +
+  annotate("text", x = min(data_all$AUDPC, na.rm = T), y = 0.97*max(data_all$pred_sev, na.rm = T), 
+           label = label5_2, hjust = 0, vjust = 0, color = "slateblue", size = 3) +
+  labs(x = "AUDPC", y = "Lesion Growth") + 
+  scale_color_identity() + 
+  ggtitle("C") +
+  theme_bw() +
+  theme(axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        plot.title = element_text(face = "bold"))
+
 all <- ggarrange(p1, p2, p3, nrow = 1, widths = c(1, 1.075, 0.925))
 png("Z:/Public/Jonas/011_STB_leaf_tracking/Figures/paper/growth_qr_corr.png", width = 9, height = 3.5, units = 'in', res = 400)
 plot(all)
+dev.off()
+
+# Plot 6: Slopes vs Severity
+pdat_all <- data_all %>% 
+  dplyr::select(genotype_name, pred_sev, slope_temp, slope_rh, slope_age) %>% 
+  tidyr::pivot_longer(slope_temp:slope_age)
+pdat_nooutlier <- data_nooutlier %>% 
+  dplyr::select(genotype_name, pred_sev, slope_temp, slope_rh, slope_age) %>% 
+  tidyr::pivot_longer(slope_temp:slope_age)
+# Create label data frame for all data
+label_df_all <- pdat_all %>%
+  group_by(name) %>% nest() %>% 
+  mutate(label = purrr::map(data, ~get_lm_label(.$value, .$pred_sev)),
+         x = purrr::map_dbl(data, ~min(.$value, na.rm = T)),
+         y = purrr::map_dbl(data, ~max(.$pred_sev, na.rm = T)-0.02)) %>% 
+  dplyr::select(-data)
+label_df_nooutlier <- pdat_nooutlier %>%
+  group_by(name) %>% nest() %>% 
+  mutate(label = purrr::map(data, ~get_lm_label(.$value, .$pred_sev)),
+         x = purrr::map_dbl(data, ~min(.$value, na.rm = T)),
+         y = purrr::map_dbl(data, ~max(.$pred_sev, na.rm = T)+0.0125)) %>% 
+  dplyr::select(-data)
+# for facet names
+trait_labels <- c(slope_age = "Lesion Age", 
+                  slope_rh = "Relative Humdity",
+                  slope_temp = "Temperature")
+p6 <- ggplot(pdat_all, aes(x = value, y = pred_sev)) +
+  geom_point(aes(color = ifelse(genotype_name == "AUBUSSON", "red", "black"))) +
+  geom_smooth(method = "lm", se = F, color = "black") +
+  geom_smooth(data = pdat_nooutlier, method = "lm", se = F, lty = 2, color = "slateblue") +
+  geom_text(data = label_df_all, aes(x = x, y = y, label = label), 
+            inherit.aes = T, hjust = 0, vjust = 0, size = 3, parse = T) +
+  geom_text(data = label_df_nooutlier, aes(x = x, y = y, label = label), 
+            inherit.aes = FALSE, hjust = 0, vjust = 0, size = 3, parse = T, color = "slateblue") +
+  labs(x = "Slope (×10⁵)", y = "Conditional Severity") + 
+  scale_color_identity() + 
+  facet_wrap(~ name, scales = "free_x", labeller = labeller(name = trait_labels)) +
+  theme_bw() +
+  theme(plot.title = element_text(face = "bold"))
+p6
+png("Z:/Public/Jonas/011_STB_leaf_tracking/Figures/paper/slope_qr_corr.png", width = 9, height = 3.5, units = 'in', res = 400)
+plot(p6)
+dev.off()
+
+# Plot 7: Slopes vs Severity
+pdat_all <- data_all %>% 
+  dplyr::select(genotype_name, pred_growth, slope_temp, slope_rh, slope_age) %>% 
+  tidyr::pivot_longer(slope_temp:slope_age)
+pdat_nooutlier <- data_nooutlier %>% 
+  dplyr::select(genotype_name, pred_growth, slope_temp, slope_rh, slope_age) %>% 
+  tidyr::pivot_longer(slope_temp:slope_age)
+# Create label data frame for all data
+label_df_all <- pdat_all %>%
+  group_by(name) %>% nest() %>% 
+  mutate(label = purrr::map(data, ~get_lm_label(.$value, .$pred_growth)),
+         x = purrr::map_dbl(data, ~min(.$value, na.rm = T)),
+         y = purrr::map_dbl(data, ~max(.$pred_growth, na.rm = T)-0.000035)) %>% 
+  dplyr::select(-data)
+label_df_nooutlier <- pdat_nooutlier %>%
+  group_by(name) %>% nest() %>% 
+  mutate(label = purrr::map(data, ~get_lm_label(.$value, .$pred_growth)),
+         x = purrr::map_dbl(data, ~min(.$value, na.rm = T)),
+         y = purrr::map_dbl(data, ~max(.$pred_growth, na.rm = T)-0.000015)) %>% 
+  dplyr::select(-data)
+# for facet names
+trait_labels <- c(slope_age = "Lesion Age", 
+                  slope_rh = "Relative Humdity",
+                  slope_temp = "Temperature")
+p7 <- ggplot(pdat_all, aes(x = value, y = pred_growth)) +
+  geom_point(aes(color = ifelse(genotype_name == "AUBUSSON", "red", "black"))) +
+  geom_smooth(method = "lm", se = F, color = "black") +
+  geom_smooth(data = pdat_nooutlier, method = "lm", se = F, lty = 2, color = "slateblue") +
+  geom_text(data = label_df_all, aes(x = x, y = y, label = label), 
+            inherit.aes = T, hjust = 0, vjust = 0, size = 3, parse = T) +
+  geom_text(data = label_df_nooutlier, aes(x = x, y = y, label = label), 
+            inherit.aes = FALSE, hjust = 0, vjust = 0, size = 3, parse = T, color = "slateblue") +
+  labs(x = "Slope (×10⁵)", y = "Genotype Main Effect") + 
+  scale_color_identity() + 
+  facet_wrap(~ name, scales = "free_x", labeller = labeller(name = trait_labels)) +
+  theme_bw() +
+  theme(plot.title = element_text(face = "bold"))
+p7
+png("Z:/Public/Jonas/011_STB_leaf_tracking/Figures/paper/slope_main_corr.png", width = 9, height = 3.5, units = 'in', res = 400)
+plot(p7)
 dev.off()
 
 # ============================================================================== -
